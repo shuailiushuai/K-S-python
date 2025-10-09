@@ -271,8 +271,23 @@ class Worker:
             self.unemployment_benefit = phi * wAvg
             self.income = self.unemployment_benefit
         
-        # Add past forced savings to consumption budget
-        self.consumption_desired = self.income + self.forced_savings
+        # Handle forced savings based on flagCons
+        flagCons = self.params.get('flagCons', 0)
+        
+        if flagCons == 0:
+            # Ignore unfilled past demand - consume only current income
+            self.consumption_desired = self.income
+        elif flagCons == 1:
+            # Spend all accumulated savings at once
+            self.consumption_desired = self.income + self.forced_savings
+        elif flagCons == 2:
+            # Recover past consumption with limit
+            Crec = self.params.get('Crec', 0.5)  # Max recovery rate
+            recovery = min(self.forced_savings, Crec * self.income)
+            self.consumption_desired = self.income + recovery
+        else:
+            # Default: ignore past savings
+            self.consumption_desired = self.income
         
         # Reset bonus
         self.bonus = 0.0

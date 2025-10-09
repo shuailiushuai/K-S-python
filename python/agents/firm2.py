@@ -101,13 +101,27 @@ class Firm2:
         """
         Form adaptive demand expectations
         """
-        # For entrants in first periods, use optimistic expectations
+        # For entrants in first periods or t=1, use recent history or initial values
         if self.life_cycle < 3:
             if len(self.demand_history) > 0:
                 self.demand_expected = max(self.demand_history[-1], self.demand_fulfilled)
             else:
-                self.demand_expected = self.params.get('initial_demand', 100)
+                # Use initial demand if available, otherwise use a small default
+                if hasattr(self, 'demand_expected') and self.demand_expected > 0:
+                    # Keep existing initial demand
+                    pass
+                else:
+                    self.demand_expected = self.params.get('initial_demand', 10)
             return
+        
+        # At t=1, if we have initial state but no history, keep initial expectations
+        if t == 1 and len(self.demand_history) == 0:
+            if hasattr(self, 'demand_expected') and self.demand_expected > 0:
+                # Keep initialization values for first step
+                return
+            else:
+                self.demand_expected = self.output_desired if self.output_desired > 0 else 10
+                return
         
         # Get expectation mode
         flag_expect = self.params.get('flagExpect', 0)
@@ -115,8 +129,12 @@ class Firm2:
         
         # Compute mix of fulfilled and potential demand
         if len(self.demand_history) == 0:
-            self.demand_expected = self.params.get('initial_demand', 100)
-            return
+            # Fallback for no history
+            if hasattr(self, 'demand_expected') and self.demand_expected > 0:
+                return  # Keep existing
+            else:
+                self.demand_expected = self.params.get('initial_demand', 10)
+                return
         
         # Get recent demand (fulfilled and orders)
         recent_demands = []
