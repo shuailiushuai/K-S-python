@@ -104,6 +104,9 @@ class KSModel:
         # Establish initial relationships (firm-bank, firm-supplier, etc.)
         self._establish_relationships()
         
+        # Assign initial employment (workers to firms) for full employment start
+        self._assign_initial_employment()
+        
         print(f"Model initialized: {len(self.firms1)} capital firms, "
               f"{len(self.firms2)} consumption firms, "
               f"{len(self.workers)} workers, {len(self.banks)} banks")
@@ -150,12 +153,39 @@ class KSModel:
         F10 = self.params.get('F10', 20)  # Initial number of firms
         NW10 = self.params.get('NW10', 100)  # Average initial net worth
         
+        # Initial values for technology (from C++ INIPROD, etc.)
+        INIPROD = 1.0
+        mu1 = self.params.get('mu1', 0.04)
+        m1 = self.params.get('m1', 1.0)
+        m2 = self.params.get('m2', 1.0)
+        b = self.params.get('b', 20)  # Payback period
+        INIWAGE = 1.0
+        
+        # Calculate initial labor productivity for sector 1
+        # From C++ logic: Btau0 = (1 + mu1) * INIPROD / (m1 * m2 * b)
+        Btau0 = (1 + mu1) * INIPROD / (m1 * m2 * b)
+        c10 = INIWAGE / (Btau0 * m1)  # Initial unit cost
+        p10 = (1 + mu1) * c10  # Initial price
+        
         for i in range(F10):
             firm = Firm1(
                 firm_id=i,
                 params=self.params,
                 initial_net_worth=NW10 * (0.5 + np.random.random())  # Random variation
             )
+            
+            # Initialize technology and pricing
+            firm.machine_productivity = INIPROD  # A_tau
+            firm.labor_productivity_output = Btau0  # B_tau
+            firm.unit_cost = c10
+            firm.price = p10
+            firm.market_share = 1.0 / F10  # Fair share
+            firm.competitiveness = 1.0
+            
+            # Initialize with some past revenue for R&D calculations
+            # Assume initial steady state revenue
+            firm.revenue = p10 * 100  # Placeholder, will be updated
+            
             self.firms1.append(firm)
     
     def _initialize_firms2(self):
@@ -163,12 +193,76 @@ class KSModel:
         F20 = self.params.get('F20', 100)  # Initial number of firms
         NW20 = self.params.get('NW20', 100)  # Average initial net worth
         
+        # Get parameters for initial setup
+        Ls0 = self.params.get('Ls0', 1000)
+        m2 = self.params.get('m2', 1.0)
+        mu20 = self.params.get('mu20', 0.35)
+        eta = self.params.get('eta', 20)  # Machine lifetime
+        iota = self.params.get('iota', 0.1)  # Inventory propensity
+        INIWAGE = 1.0
+        INIPROD = 1.0  # Initial productivity
+        
+        # Calculate initial capital for full employment (K0)
+        # Based on C++ logic: K0 = Ls0 * INIWAGE / p20
+        c20 = INIWAGE / INIPROD  # Initial unit cost
+        p20 = (1 + mu20) * c20  # Initial price
+        K0_total = Ls0 * INIWAGE / p20  # Total capital for full employment
+        K0_per_firm = K0_total / F20  # Capital per firm
+        
+        # Initial demand per firm (fair share)
+        D20 = K0_per_firm / m2  # Simplified initial demand
+        
         for i in range(F20):
             firm = Firm2(
                 firm_id=i,
                 params=self.params,
                 initial_net_worth=NW20 * (0.5 + np.random.random())  # Random variation
             )
+            
+            # Initialize capital stock with vintages (matches C++ add_vintage logic)
+            n_machines = max(1, int(np.ceil(K0_per_firm / m2)))
+            firm.capital_stock = n_machines * m2
+            firm.capital_desired = firm.capital_stock
+            
+            # Create initial mix of vintages (old to new)
+            # Distribute machines across vintages of different ages
+            machines_per_vintage = max(1, int(np.ceil(n_machines / eta)))
+            age = eta
+            remaining_machines = n_machines
+            
+            from agents.vintage import Vintage
+            while remaining_machines > 0 and age > 0:
+                n_vint = min(machines_per_vintage, remaining_machines)
+                if n_vint > 0:
+                    # Select a random supplier (will be properly assigned later)
+                    supplier_id = np.random.randint(0, len(self.firms1)) if self.firms1 else 0
+                    birth_time = 1 - age  # Vintage age (negative for initial vintages)
+                    
+                    # Create vintage with proper parameter order
+                    vintage_id = birth_time * 10000 + supplier_id
+                    vintage = Vintage(
+                        vintage_id=vintage_id,
+                        birth_time=birth_time,
+                        supplier_id=supplier_id,
+                        productivity=INIPROD,  # Initial productivity
+                        machines=n_vint,
+                        price=p20 / m2  # Price per machine
+                    )
+                    firm.vintages.append(vintage)
+                    remaining_machines -= n_vint
+                age -= 1
+            
+            # Initialize production variables
+            firm.output_desired = D20
+            firm.demand_expected = D20
+            firm.inventories = iota * D20  # Initial inventories
+            firm.price = p20
+            firm.unit_cost = c20
+            firm.market_share = 1.0 / F20  # Fair share
+            firm.competitiveness = 1.0
+            firm.quality = 1.0
+            firm.life_cycle = 3  # Start as incumbent
+            
             self.firms2.append(firm)
     
     def _establish_relationships(self):
@@ -192,6 +286,79 @@ class KSModel:
         # Distribute equity among banks
         for bank in self.banks:
             bank.equity = EqB0 * total_nw / len(self.banks)
+    
+    def _assign_initial_employment(self):
+        """
+        Assign workers to firms initially to achieve near-full employment.
+        This matches the C++ model's initial state where workers start employed.
+        """
+        # Calculate labor demand per firm based on initial capital
+        # For Firm2: labor needed = capital * m2 / productivity
+        m2 = self.params.get('m2', 1.0)
+        INIPROD = 1.0
+        
+        # Calculate total labor needed for Firm2
+        total_labor_firm2 = 0
+        for firm in self.firms2:
+            # Labor needed to operate the capital stock
+            labor_needed = firm.capital_stock / INIPROD if INIPROD > 0 else 0
+            firm.labor_demand = labor_needed
+            firm.labor_actual = labor_needed
+            total_labor_firm2 += labor_needed
+        
+        # Allocate remaining labor to Firm1 (roughly 10-15% of workforce)
+        total_workers = len(self.workers)
+        labor_firm1 = max(0, total_workers - total_labor_firm2)
+        labor_per_firm1 = labor_firm1 / len(self.firms1) if self.firms1 else 0
+        
+        for firm in self.firms1:
+            firm.labor_demand = labor_per_firm1
+            firm.labor_actual = labor_per_firm1
+        
+        # Shuffle workers for random assignment
+        available_workers = list(self.workers)
+        np.random.shuffle(available_workers)
+        
+        worker_idx = 0
+        INIWAGE = 1.0
+        
+        # Assign workers to Firm2 first (largest employer)
+        for firm in self.firms2:
+            n_workers_needed = int(firm.labor_actual)
+            for _ in range(n_workers_needed):
+                if worker_idx < len(available_workers):
+                    worker = available_workers[worker_idx]
+                    worker.employed = True
+                    worker.employer = firm
+                    worker.employer_sector = 2
+                    worker.wage = INIWAGE
+                    worker.tenure = 0
+                    worker.unemployment_duration = 0
+                    firm.workers.append(worker)
+                    worker_idx += 1
+                else:
+                    break
+        
+        # Assign remaining workers to Firm1
+        for firm in self.firms1:
+            n_workers_needed = int(firm.labor_actual)
+            for _ in range(n_workers_needed):
+                if worker_idx < len(available_workers):
+                    worker = available_workers[worker_idx]
+                    worker.employed = True
+                    worker.employer = firm
+                    worker.employer_sector = 1
+                    worker.wage = INIWAGE
+                    worker.tenure = 0
+                    worker.unemployment_duration = 0
+                    firm.workers.append(worker)
+                    worker_idx += 1
+                else:
+                    break
+        
+        # Remaining workers stay unemployed (target ~5% unemployment)
+        print(f"Initial employment: {worker_idx}/{total_workers} workers employed "
+              f"({100*worker_idx/total_workers:.1f}%)")
     
     def run(self, time_steps: int):
         """
