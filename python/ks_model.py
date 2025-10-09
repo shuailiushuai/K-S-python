@@ -436,6 +436,9 @@ class KSModel:
             firm.produce(t)
             firm.set_price(t)
         
+        # 8.5. Capital market delivers machines to Firm2
+        self.capital_market.deliver_machines(t)
+        
         # 9. Government determines expenditure
         self.government.determine_expenditure(t, self.workers, self.central_bank)
         
