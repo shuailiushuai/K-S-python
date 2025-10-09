@@ -1,0 +1,17 @@
+{
+  "description": "Baseline K+S Model Configuration",
+  "seed": 42,
+  
+  "F10": 20,
+  "F20": 100,
+  "Ls0": 1000,
+  "B": 10,
+  
+  "TregChg": 0,
+  
+  "flagGovExp": 2,
+  "flagCreditRule": 2,
+  "flagWorkerLBU": 0,
+  "flagWorkerSkProd": 0,
+  "flagExpect": 0
+}
