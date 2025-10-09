@@ -193,24 +193,45 @@ class KSModel:
         F20 = self.params.get('F20', 100)  # Initial number of firms
         NW20 = self.params.get('NW20', 100)  # Average initial net worth
         
-        # Get parameters for initial setup
+        # Get parameters for initial setup (matching C++ fun_KS_country.h)
         Ls0 = self.params.get('Ls0', 1000)
+        m1 = self.params.get('m1', 1.0)
         m2 = self.params.get('m2', 1.0)
+        mu1 = self.params.get('mu1', 0.04)
         mu20 = self.params.get('mu20', 0.35)
         eta = self.params.get('eta', 20)  # Machine lifetime
         iota = self.params.get('iota', 0.1)  # Inventory propensity
+        phi = self.params.get('phi', 0.5)  # Unemployment benefit rate
+        nu = self.params.get('nu', 0.04)  # R&D intensity
+        flagTax = self.params.get('flagTax', 1)
+        tr = self.params.get('tr', 0.1) if flagTax > 0 else 0.0
+        Btau0 = self.params.get('Btau0', 1.0)  # Initial productivity in sector 1
+        
         INIWAGE = 1.0
-        INIPROD = 1.0  # Initial productivity
+        INIPROD = 1.0  # Initial productivity in sector 2
         
-        # Calculate initial capital for full employment (K0)
-        # Based on C++ logic: K0 = Ls0 * INIWAGE / p20
-        c20 = INIWAGE / INIPROD  # Initial unit cost
-        p20 = (1 + mu20) * c20  # Initial price
-        K0_total = Ls0 * INIWAGE / p20  # Total capital for full employment
-        K0_per_firm = K0_total / F20  # Capital per firm
+        # Calculate initial values matching C++ logic
+        c10 = INIWAGE / (Btau0 * m1)  # Initial cost in sector 1
+        c20 = INIWAGE / INIPROD  # Initial cost in sector 2
+        p10 = (1 + mu1) * c10  # Initial price sector 1
+        p20 = (1 + mu20) * c20  # Initial price sector 2
+        trW = tr  # Tax rate on wages
         
-        # Initial demand per firm (fair share)
-        D20 = K0_per_firm / m2  # Simplified initial demand
+        K0_total = Ls0 * INIWAGE / p20  # Full employment capital required
+        D10 = K0_total / (m2 * eta)  # Initial demand for sector 1
+        RD0 = nu * D10 * p10  # Initial R&D expense
+        
+        # Initial demand for sector 2 (correct formula from C++)
+        D20_total = ((D10 * c10 + RD0) * (1 - phi - trW) + Ls0 * INIWAGE * phi) / \
+                    (mu20 + phi + trW) * c20
+        D20 = D20_total / F20  # Per firm
+        
+        # Initial labor demands
+        Ld10 = RD0 / INIWAGE + D10 / (Btau0 * m1)
+        Ld20 = D20_total / INIPROD
+        
+        # Calculate capital per firm to meet demand
+        K0_per_firm = K0_total / F20
         
         for i in range(F20):
             firm = Firm2(
