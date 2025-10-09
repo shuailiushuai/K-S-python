@@ -132,9 +132,12 @@ class FinancialMarket:
         """
         # Firm1 credit demand (for production)
         for firm in self.firms1:
+            # Project wage bill based on labor demand and average wage
+            projected_wage_bill = firm.labor_demand * firm.avg_wage if firm.labor_demand > 0 else 0
+            
             # Need credit for wage bill and R&D
-            cash_needed = firm.wage_bill + firm.rd_expenditure
-            available_cash = firm.deposits
+            cash_needed = projected_wage_bill + firm.rd_expenditure
+            available_cash = max(firm.net_worth, 0)  # Use net worth as available cash
             
             credit_demand = max(0, cash_needed - available_cash)
             
@@ -146,15 +149,22 @@ class FinancialMarket:
         
         # Firm2 credit demand (for production and investment)
         for firm in self.firms2:
-            # Need credit for wage bill and investment
-            cash_needed = firm.wage_bill
+            # Project wage bill based on labor demand and average wage
+            projected_wage_bill = firm.labor_demand * firm.avg_wage if firm.labor_demand > 0 else 0
+            
+            # Need credit for wage bill
+            cash_needed = projected_wage_bill
             
             # Add investment cost
-            if firm.investment_desired > 0 and firm.main_supplier:
-                investment_cost = firm.investment_desired * firm.main_supplier.price
-                cash_needed += investment_cost
+            if firm.investment_desired > 0:
+                # Find average price from Firm1 suppliers
+                if self.firms1:
+                    avg_price = np.mean([f.price for f in self.firms1])
+                    m2 = self.params.get('m2', 1.0)
+                    investment_cost = (firm.investment_desired / m2) * avg_price
+                    cash_needed += investment_cost
             
-            available_cash = firm.deposits
+            available_cash = max(firm.net_worth, 0)  # Use net worth as available cash
             credit_demand = max(0, cash_needed - available_cash)
             
             # Check prudential limit

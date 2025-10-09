@@ -424,6 +424,9 @@ class KSModel:
         self.labor_market.firms_post_vacancies(t)
         self.labor_market.match_workers_to_jobs(t)
         
+        # 7.5. Banks collect deposits and allocate credit to firms
+        self.financial_market.process_credit_requests(t)
+        
         # 8. Production is adjusted to actual labor hired
         for firm in self.firms1:
             firm.produce(t)
