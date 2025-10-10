@@ -44,8 +44,9 @@ class GoodsMarket:
         # Calculate total demand from workers
         self.total_demand = sum(w.consumption_desired for w in self.workers)
         
-        # Calculate total supply (output + inventories)
-        self.total_supply = sum(f.inventories for f in self.firms2)
+        # Calculate total supply (current output + past inventories)
+        # Following C++ model: sup2[j] = _Q2e + _N[t-1]
+        self.total_supply = sum(f.output + f.inventories for f in self.firms2)
         
         # Update firm competitiveness
         self._update_competitiveness(t)
@@ -88,13 +89,15 @@ class GoodsMarket:
         for firm in self.firms2:
             firm_demand = firm.market_share * self.total_demand
             
-            # Fulfill demand from inventories
-            available = firm.inventories
+            # Fulfill demand from current output + inventories (C++ logic)
+            available = firm.output + firm.inventories
             fulfilled = min(firm_demand, available)
             
             firm.demand_fulfilled = fulfilled
             firm.demand_unfilled = firm_demand - fulfilled
-            firm.inventories -= fulfilled
+            
+            # Update inventories: add current output, subtract sales
+            firm.inventories += firm.output - fulfilled
             firm.sales = fulfilled
             
             # Record in history

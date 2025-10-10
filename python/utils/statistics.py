@@ -181,43 +181,66 @@ class Statistics:
         """
         Calculate real GDP (constant prices)
         
-        GDP = Consumption + Investment + Change in Inventories
-        Real GDP uses constant (initial) prices.
+        Following C++ model (fun_KS_country.h line 212):
+        GDPreal = max(Ireal + Creal, 1)
+        
+        Where:
+        - Ireal = (SI + EI) / m2 * pK0 (investment in constant prices)
+        - Creal = Q2e * pC0 (consumption in constant prices)
         """
-        # Real consumption (goods consumed by workers in real terms)
-        real_consumption = sum(w.consumption_actual for w in model.workers)
+        # Get initial prices
+        pC0 = model.params.get('pC0', 1.0)  # Initial consumption price
+        pK0 = model.params.get('pK0', 1.0)  # Initial capital price (machine price)
+        m2 = model.params.get('m2', 1.0)    # Machines per capital unit
         
-        # Real investment (machines produced by Firm1 in real terms)
-        # Investment in constant prices = number of machines * initial price
-        p10 = model.params.get('p10', 1.0)  # Initial machine price
-        real_investment = sum(f.output for f in model.firms1) * p10
+        # Real consumption: Q2e (effective output of Firm2) * pC0
+        # Q2e is the sum of actual output across all Firm2
+        real_consumption = sum(f.output for f in model.firms2) * pC0
         
-        # Change in inventories (in real terms)
-        # For simplicity, we track this as the difference in inventory values
-        # In the full model, this would be calculated more precisely
+        # Real investment: delivered investment in real terms
+        # Convert monetary investment to real by dividing by pK0
+        total_delivered_investment = sum(
+            f.expansion_investment_delivered + f.replacement_investment_delivered
+            for f in model.firms2
+        )
+        real_investment = total_delivered_investment / pK0
         
-        return max(real_consumption + real_investment, 0.0)
+        return max(real_consumption + real_investment, 1.0)
     
     def _calculate_gdp_nominal(self, model) -> float:
         """
         Calculate nominal GDP (current prices)
         
-        GDP = Consumption + Investment + Change in Inventories
+        Following C++ model (fun_KS_country.h line 219):
+        GDPnom = max(C + Inom + dNnom, 1)
+        
+        Where:
+        - C = S2 (nominal consumption - sales of Firm2)
+        - Inom = SUM(_Inom) (nominal investment by Firm2)
+        - dNnom = SUM(_dNnom) (change in nominal inventories)
         """
-        # Nominal consumption (what workers actually spent)
-        nominal_consumption = sum(w.consumption_actual * model.goods_market.params.get('CPI', 1.0) 
-                                 for w in model.workers)
+        # Nominal consumption (sales revenue of Firm2)
+        nominal_consumption = sum(f.sales * f.price for f in model.firms2)
         
-        # Nominal investment (machines bought by Firm2)
-        nominal_investment = sum(f.expansion_investment + f.replacement_investment 
-                                for f in model.firms2)
+        # Nominal investment (value of delivered machines in monetary terms)
+        nominal_investment = sum(
+            f.expansion_investment_delivered + f.replacement_investment_delivered
+            for f in model.firms2
+        )
         
-        # Total revenue is an alternative measure
-        revenue1 = sum(f.revenue for f in model.firms1)
-        revenue2 = sum(f.revenue for f in model.firms2)
+        # Change in nominal inventories
+        # dN_nominal = new_inventories * price - old_inventories * old_price
+        # For simplicity, approximate as change in inventory value
+        if hasattr(model, 'prev_inventory_value'):
+            current_inventory_value = sum(f.inventories * f.price for f in model.firms2)
+            d_inventories_nominal = current_inventory_value - model.prev_inventory_value
+            model.prev_inventory_value = current_inventory_value
+        else:
+            # First period: no change
+            model.prev_inventory_value = sum(f.inventories * f.price for f in model.firms2)
+            d_inventories_nominal = 0.0
         
-        # Use revenue-based calculation as it's more straightforward
-        return max(revenue1 + revenue2, 0.0)
+        return max(nominal_consumption + nominal_investment + d_inventories_nominal, 1.0)
     
     def _calculate_price_level(self, model) -> float:
         """Calculate aggregate price level"""

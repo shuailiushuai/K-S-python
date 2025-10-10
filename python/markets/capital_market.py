@@ -72,15 +72,27 @@ class CapitalMarket:
                     supplier.orders += firm2.investment_desired
                     self.total_orders += firm2.investment_desired
                     
-                    # Store order for delivery
+                    # Store orders for delivery (separate SI and EI)
                     if not hasattr(firm2, 'pending_orders'):
                         firm2.pending_orders = []
                     
-                    firm2.pending_orders.append({
-                        'supplier': supplier,
-                        'machines': firm2.investment_desired,
-                        'time': t
-                    })
+                    # Expansion investment order
+                    if firm2.expansion_investment > 0:
+                        firm2.pending_orders.append({
+                            'supplier': supplier,
+                            'machines': firm2.expansion_investment,
+                            'time': t,
+                            'type': 'expansion'
+                        })
+                    
+                    # Replacement investment order
+                    if firm2.replacement_investment > 0:
+                        firm2.pending_orders.append({
+                            'supplier': supplier,
+                            'machines': firm2.replacement_investment,
+                            'time': t,
+                            'type': 'replacement'
+                        })
     
     def _select_supplier(self, firm2, t: int):
         """
@@ -146,6 +158,10 @@ class CapitalMarket:
         m2 = self.params.get('m2', 1.0)
         
         for firm2 in self.firms2:
+            # Reset delivered investment tracking for this period
+            firm2.expansion_investment_delivered = 0.0
+            firm2.replacement_investment_delivered = 0.0
+            
             if not hasattr(firm2, 'pending_orders') or not firm2.pending_orders:
                 continue
             
@@ -155,12 +171,22 @@ class CapitalMarket:
             for i, order in enumerate(firm2.pending_orders):
                 supplier = order['supplier']
                 machines_ordered = order['machines']
+                order_type = order.get('type', 'expansion')  # expansion or replacement
                 
                 # Deliver what the supplier has produced (may be partial)
                 # In the C++ model, machines are delivered after production
                 if supplier.output > 0:
                     # Deliver the minimum of what was ordered and what was produced
                     machines_delivered = min(machines_ordered, supplier.output)
+                    
+                    # Calculate monetary value of delivered investment
+                    investment_value = machines_delivered * supplier.price
+                    
+                    # Track delivered investment by type
+                    if order_type == 'expansion':
+                        firm2.expansion_investment_delivered += investment_value
+                    else:
+                        firm2.replacement_investment_delivered += investment_value
                     
                     # Create new vintage with delivered machines
                     vintage_id = t * 10000 + supplier.firm_id

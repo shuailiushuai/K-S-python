@@ -66,6 +66,8 @@ class Firm2:
         self.investment_desired = 0.0
         self.expansion_investment = 0.0
         self.replacement_investment = 0.0
+        self.expansion_investment_delivered = 0.0  # Actual delivered
+        self.replacement_investment_delivered = 0.0  # Actual delivered
         
         # Market variables
         self.market_share = 1.0 / params.get('F20', 100)
@@ -300,8 +302,8 @@ class Firm2:
         
         self.output = self.output_planned * min(1.0, labor_ratio)
         
-        # Update inventories
-        self.inventories += self.output
+        # Note: inventories are updated AFTER goods market (sales deduction)
+        # Do NOT add output here - it will be accounted for in goods market
     
     def set_price(self, t: int):
         """
