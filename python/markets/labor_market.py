@@ -293,6 +293,89 @@ class LaborMarket:
         self.applications_firm1.clear()
         self.applications_firm2.clear()
     
+    def allocate_sector1_rd_labor(self):
+        """
+        Allocate R&D and production workers in capital-good sector (Firm1)
+        
+        This implements the critical L1rd equation from fun_KS_capital.h lines 331-380.
+        The sector has total L1 workers which must be distributed between R&D and 
+        production across all firms, respecting the L1rdMax constraint.
+        
+        This is a KEY missing feature that was causing model collapse.
+        """
+        # Total workers and demands in sector 1
+        L1 = sum(len(firm.workers) for firm in self.firms1)  # Total workers in sector 1
+        L1d = sum(firm.labor_demand for firm in self.firms1)  # Total labor demand
+        L1dRD = sum(getattr(firm, 'rd_labor_demand', 0) for firm in self.firms1)  # R&D demand
+        
+        if L1 == 0 or L1d == 0:
+            # No workers or demand - clear R&D allocations
+            for firm in self.firms1:
+                firm.labor_actual = len(firm.workers)
+                firm.rd_workers = 0
+            return
+        
+        # Get labor supply and R&D max parameter
+        Ls = len(self.workers)  # Total labor supply
+        L1rdMax = self.params.get('L1rdMax', 0.2)  # Max 20% of total labor in R&D
+        
+        # Calculate sector R&D labor allocation (limited by L1rdMax)
+        # C++: v[0] = min( v[3], min( v[1], round( VS( LABSUPL1, "Ls" ) * V( "L1rdMax" ) ) ) )
+        L1rd = min(L1dRD, min(L1, round(Ls * L1rdMax)))
+        
+        # Distribute workers among firms
+        total_allocated = 0
+        total_rd_allocated = 0
+        
+        for i, firm in enumerate(self.firms1):
+            firm_L1d = firm.labor_demand  # Firm total labor demand
+            firm_L1dRD = getattr(firm, 'rd_labor_demand', 0)  # Firm R&D demand
+            
+            # Calculate effective firm R&D workers (proportional allocation)
+            if L1dRD > 0:
+                firm_rd = np.ceil(firm_L1dRD * L1rd / L1dRD)
+            else:
+                firm_rd = 0
+            
+            # Calculate production workers after possible shortage
+            if L1d > L1dRD:
+                firm_prod = round((firm_L1d - firm_L1dRD) * (L1 - L1rd) / (L1d - L1dRD))
+            else:
+                firm_prod = 0
+            
+            # Total workers for this firm (cannot exceed firm demand)
+            firm_total = min(firm_rd + firm_prod, firm_L1d)
+            
+            # Prevent rounding errors from allocating more than total workers
+            is_last_firm = (i == len(self.firms1) - 1)
+            if total_allocated + firm_total > L1 or (is_last_firm and total_allocated + firm_total < L1):
+                firm_total = L1 - total_allocated
+            
+            total_allocated += firm_total
+            
+            # Enforce firm total constraint on R&D workers
+            firm_rd = min(firm_rd, firm_total)
+            
+            # Prevent rounding errors for total R&D workers
+            if total_rd_allocated + firm_rd > L1rd or (is_last_firm and total_rd_allocated + firm_rd < L1rd):
+                firm_rd = L1rd - total_rd_allocated
+            
+            total_rd_allocated += firm_rd
+            
+            # Update firm's labor allocation
+            # Note: labor_actual should already be set to len(firm.workers)
+            # We now specify how many are in R&D vs production
+            firm.rd_workers = int(firm_rd)
+            firm.production_workers = int(max(0, firm_total - firm_rd))
+            
+            # Debug check
+            if firm_total != len(firm.workers):
+                # Workers list may have changed, adjust allocations proportionally
+                if len(firm.workers) > 0:
+                    ratio = len(firm.workers) / max(1, firm_total)
+                    firm.rd_workers = int(firm.rd_workers * ratio)
+                    firm.production_workers = len(firm.workers) - firm.rd_workers
+    
     def _order_wage_offers(self, offers: List[Dict], flag_hire_seq: int) -> List[Dict]:
         """
         Order wage offers for hiring sequence
