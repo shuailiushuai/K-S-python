@@ -207,6 +207,7 @@ class KSModel:
         mu20 = self.params.get('mu20', 0.35)
         eta = self.params.get('eta', 20)  # Machine lifetime
         iota = self.params.get('iota', 0.1)  # Inventory propensity
+        u = self.params.get('u', 0.75)  # Planned capacity utilization
         phi = self.params.get('phi', 0.5)  # Unemployment benefit rate
         nu = self.params.get('nu', 0.04)  # R&D intensity
         flagTax = self.params.get('flagTax', 1)
@@ -280,9 +281,14 @@ class KSModel:
                 age -= 1
             
             # Initialize production variables
-            firm.output_desired = D20
-            firm.demand_expected = D20
-            firm.inventories = iota * D20  # Initial inventories
+            # Output and demand should be consistent with capital stock
+            # Labor productivity = INIPROD, so output capacity = capital_stock
+            initial_output = firm.capital_stock  # With INIPROD=1.0
+            
+            firm.output_desired = initial_output
+            firm.demand_expected = initial_output  # Expect to sell what can be produced
+            firm.output_planned = initial_output * u  # Planned at u capacity utilization
+            firm.inventories = iota * initial_output  # Initial inventories
             firm.price = p20
             firm.unit_cost = c20
             firm.market_share = 1.0 / F20  # Fair share
