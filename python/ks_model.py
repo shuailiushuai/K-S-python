@@ -246,6 +246,11 @@ class KSModel:
         Ld10 = RD0 / INIWAGE + D10 / (Btau0 * m1)
         Ld20 = D20_total / INIPROD
         
+        # Store initial labor demands for use in employment assignment
+        self.params.set('Ld10', Ld10)  # Total labor demand for Firm1 sector
+        self.params.set('Ld20', Ld20)  # Total labor demand for Firm2 sector
+        self.params.set('D10', D10)    # Initial production demand for Firm1 sector
+        
         # Calculate capital per firm to meet demand
         K0_per_firm = K0_total / F20
         
@@ -333,34 +338,44 @@ class KSModel:
         """
         Assign workers to firms initially to achieve near-full employment.
         This matches the C++ model's initial state where workers start employed.
+        
+        Uses the calculated initial labor demands (Ld10, Ld20) from initialization.
         """
-        # Calculate labor demand per firm based on initial capital
-        # For Firm2: labor needed = capital * m2 / productivity
-        m2 = self.params.get('m2', 1.0)
-        INIPROD = 1.0
+        # Get calculated initial labor demands (from _initialize_firms2)
+        Ld10 = self.params.get('Ld10', 200)  # Total labor demand sector 1
+        Ld20 = self.params.get('Ld20', 800)  # Total labor demand sector 2
+        D10 = self.params.get('D10', 37)     # Production demand sector 1
         
-        # Calculate total labor needed for Firm2
-        total_labor_firm2 = 0
-        for firm in self.firms2:
-            # Labor needed to operate the capital stock
-            labor_needed = firm.capital_stock / INIPROD if INIPROD > 0 else 0
-            firm.labor_demand = labor_needed
-            firm.labor_actual = labor_needed
-            total_labor_firm2 += labor_needed
+        m1 = self.params.get('m1', 1.0)
+        Btau0 = self.params.get('Btau0', 0.052)
+        INIWAGE = 1.0
+        nu = self.params.get('nu', 0.04)
         
-        # Allocate remaining labor to Firm1 (roughly 10-15% of workforce)
-        total_workers = len(self.workers)
-        labor_firm1 = max(0, total_workers - total_labor_firm2)
-        labor_per_firm1 = labor_firm1 / len(self.firms1) if self.firms1 else 0
+        # Calculate labor needs for Firm1 sector
+        # Each firm needs: (production workers) + (R&D workers)
+        # Production workers per firm = (D10 / F1) / (Btau0 * m1)
+        # R&D workers per firm = nu * (D10 / F1) * p10 / INIWAGE
         
+        F1 = len(self.firms1)
+        F2 = len(self.firms2)
+        
+        # Distribute labor among Firm1 firms
+        labor_per_firm1 = Ld10 / F1 if F1 > 0 else 0
         for firm in self.firms1:
             firm.labor_demand = labor_per_firm1
             firm.labor_actual = labor_per_firm1
+        
+        # Distribute labor among Firm2 firms
+        labor_per_firm2 = Ld20 / F2 if F2 > 0 else 0
+        for firm in self.firms2:
+            firm.labor_demand = labor_per_firm2
+            firm.labor_actual = labor_per_firm2
         
         # Shuffle workers for random assignment
         available_workers = list(self.workers)
         np.random.shuffle(available_workers)
         
+        total_workers = len(self.workers)
         worker_idx = 0
         INIWAGE = 1.0
         

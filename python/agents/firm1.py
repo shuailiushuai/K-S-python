@@ -222,12 +222,33 @@ class Firm1:
     def produce(self, t: int):
         """
         Produce machines with actual labor hired
+        
+        Following C++ model (_Q1e equation, fun_KS_firm1.h lines 411-440):
+        - Allocate workers between R&D and production
+        - Adjust output based on available production workers
+        - Ensure output is never negative
         """
         m1 = self.params.get('m1', 1.0)
+        L1rdMax = self.params.get('L1rdMax', 0.2)  # Max fraction of workers in R&D
         
-        # Actual production limited by labor
-        production_workers = self.labor_actual - self.rd_workers
-        self.output = min(self.output, production_workers * m1)
+        # First, limit R&D workers to what we actually have and maximum share
+        max_rd_workers = min(self.labor_actual, 
+                            self.labor_actual * L1rdMax,
+                            self.rd_workers)
+        actual_rd_workers = max(0, max_rd_workers)
+        
+        # Production workers are what remains after R&D allocation
+        production_workers = max(0, self.labor_actual - actual_rd_workers)
+        
+        # Calculate what can be produced with available production workers
+        max_output = production_workers * self.labor_productivity_output * m1
+        
+        # Actual output is minimum of planned and producible
+        # C++ uses max(output, 0) at line 440 to ensure non-negative
+        self.output = max(0, min(self.output, max_output))
+        
+        # Update actual R&D workers used
+        self.rd_workers = actual_rd_workers
         
         # Update machine productivity from R&D
         if t > 1:  # After initialization
