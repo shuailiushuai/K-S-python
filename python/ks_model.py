@@ -70,6 +70,12 @@ class KSModel:
         # Statistics collection
         self.stats = Statistics()
         
+        # Entry/exit tracking
+        self.entry_firms1 = 0
+        self.exit_firms1 = 0
+        self.entry_firms2 = 0
+        self.exit_firms2 = 0
+        
         # Initialize the model
         self._initialize()
     
@@ -415,6 +421,12 @@ class KSModel:
         """
         t = self.t
         
+        # Reset entry/exit counters at start of time step
+        self.entry_firms1 = 0
+        self.exit_firms1 = 0
+        self.entry_firms2 = 0
+        self.exit_firms2 = 0
+        
         # 1. Regulatory regime change (if applicable)
         self._apply_regime_change()
         
@@ -533,6 +545,7 @@ class KSModel:
             else:
                 # Handle exit: fire workers, default on loans
                 firm.exit(self.labor_market, self.financial_market)
+                self.exit_firms2 += 1
         
         self.firms2 = surviving_firms2
         
@@ -543,6 +556,7 @@ class KSModel:
                 surviving_firms1.append(firm)
             else:
                 firm.exit(self.labor_market, self.financial_market)
+                self.exit_firms1 += 1
         
         self.firms1 = surviving_firms1
     
@@ -566,6 +580,7 @@ class KSModel:
                     entry_time=t
                 )
                 self.firms1.append(firm)
+                self.entry_firms1 += 1
         
         # Firm2 entry
         F2min = self.params.get('F2min', 50)
@@ -581,6 +596,7 @@ class KSModel:
                     entry_time=t
                 )
                 self.firms2.append(firm)
+                self.entry_firms2 += 1
     
     def get_statistics(self) -> Dict[str, Any]:
         """

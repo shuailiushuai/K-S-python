@@ -88,6 +88,7 @@ class Firm2:
         # Suppliers (Firm1)
         self.suppliers = []  # List of Firm1 suppliers
         self.main_supplier = None
+        self.pending_orders = []  # List of pending machine orders
         
         # Bank relationship
         self.bank = None
@@ -253,23 +254,37 @@ class Firm2:
             self.expansion_investment = 0.0
         
         # Replacement investment (replace old machines)
+        eta = self.params.get('eta', 20)  # Technical lifetime
         b = self.params.get('b', 20)  # Payback period
-        self.replacement_investment = self._determine_replacement(t, b)
+        self.replacement_investment = self._determine_replacement(t, eta, b)
         
         self.investment_desired = self.expansion_investment + self.replacement_investment
     
-    def _determine_replacement(self, t: int, payback_period: float) -> float:
+    def _determine_replacement(self, t: int, eta: float, b: float) -> float:
         """
-        Determine which machines to replace based on payback rule
+        Determine which machines to replace based on technical lifetime and payback rule
+        
+        Args:
+            t: Current time
+            eta: Technical lifetime of machines
+            b: Payback period for replacement
         """
         machines_to_replace = 0.0
         
         # Check each vintage
         for vintage in self.vintages:
-            # Simple payback: replace if vintage is too old or unproductive
             age = t - vintage.birth_time
-            if age > payback_period:
+            
+            # First: check if machine exceeded technical lifetime
+            if age >= eta:
                 machines_to_replace += vintage.machines
+                continue
+            
+            # Second: check economic payback
+            # If a new machine from supplier is more productive and pays back in < b periods
+            # then replace this vintage (simplified check)
+            # For now, we just use the age-based rule
+            # TODO: Implement full payback calculation comparing with supplier technology
         
         return machines_to_replace
     

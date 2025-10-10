@@ -132,11 +132,11 @@ class Statistics:
         self.data['num_firms1'].append(len(model.firms1))
         self.data['num_firms2'].append(len(model.firms2))
         
-        # Entry/exit (simplified - would need tracking)
-        self.data['entry_firms1'].append(0)
-        self.data['exit_firms1'].append(0)
-        self.data['entry_firms2'].append(0)
-        self.data['exit_firms2'].append(0)
+        # Entry/exit (now properly tracked)
+        self.data['entry_firms1'].append(model.entry_firms1)
+        self.data['exit_firms1'].append(model.exit_firms1)
+        self.data['entry_firms2'].append(model.entry_firms2)
+        self.data['exit_firms2'].append(model.exit_firms2)
         
         # Productivity
         if model.firms1:
