@@ -103,7 +103,9 @@ class Parameters:
             'xi': 0.5,
             'zeta1': 0.3,
             'zeta2': 0.3,
-            'pK0': 1.0,
+            'pK0': 1.0,  # Will be recalculated during initialization
+            'x2inf': -0.15,
+            'x2sup': 0.15,
             
             # Consumption-good sector
             'F20': 100,
@@ -135,6 +137,7 @@ class Parameters:
             'u': 0.75,
             'upsilon': 0.02,
             'initial_demand': 100.0,
+            'pC0': 1.0,  # Will be recalculated during initialization
             
             # Labor market
             'Gamma': 0.0,
