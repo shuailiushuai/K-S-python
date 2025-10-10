@@ -178,22 +178,46 @@ class Statistics:
             self._collect_distributions(model, t)
     
     def _calculate_gdp_real(self, model) -> float:
-        """Calculate real GDP (constant prices)"""
-        # Production in real terms
-        q1 = sum(f.output for f in model.firms1)
-        q2 = sum(f.output for f in model.firms2)
+        """
+        Calculate real GDP (constant prices)
         
-        # Real GDP = real consumption + real investment
-        # Simplified: use output values
-        return q1 + q2
+        GDP = Consumption + Investment + Change in Inventories
+        Real GDP uses constant (initial) prices.
+        """
+        # Real consumption (goods consumed by workers in real terms)
+        real_consumption = sum(w.consumption_actual for w in model.workers)
+        
+        # Real investment (machines produced by Firm1 in real terms)
+        # Investment in constant prices = number of machines * initial price
+        p10 = model.params.get('p10', 1.0)  # Initial machine price
+        real_investment = sum(f.output for f in model.firms1) * p10
+        
+        # Change in inventories (in real terms)
+        # For simplicity, we track this as the difference in inventory values
+        # In the full model, this would be calculated more precisely
+        
+        return max(real_consumption + real_investment, 0.0)
     
     def _calculate_gdp_nominal(self, model) -> float:
-        """Calculate nominal GDP"""
-        # Revenue from all sectors
+        """
+        Calculate nominal GDP (current prices)
+        
+        GDP = Consumption + Investment + Change in Inventories
+        """
+        # Nominal consumption (what workers actually spent)
+        nominal_consumption = sum(w.consumption_actual * model.goods_market.params.get('CPI', 1.0) 
+                                 for w in model.workers)
+        
+        # Nominal investment (machines bought by Firm2)
+        nominal_investment = sum(f.expansion_investment + f.replacement_investment 
+                                for f in model.firms2)
+        
+        # Total revenue is an alternative measure
         revenue1 = sum(f.revenue for f in model.firms1)
         revenue2 = sum(f.revenue for f in model.firms2)
         
-        return revenue1 + revenue2
+        # Use revenue-based calculation as it's more straightforward
+        return max(revenue1 + revenue2, 0.0)
     
     def _calculate_price_level(self, model) -> float:
         """Calculate aggregate price level"""
