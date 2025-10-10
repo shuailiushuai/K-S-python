@@ -58,6 +58,7 @@ class Firm1:
         self.market_share = 1.0 / params.get('F10', 20)  # Initial equal shares
         self.clients = []  # List of Firm2 clients
         self.orders = 0.0
+        self.sales_history = []  # Track past sales for R&D calculation
         
         # Labor variables
         self.labor_demand = 0.0
@@ -184,16 +185,36 @@ class Firm1:
     def determine_labor_demand(self, t: int):
         """
         Determine labor demand for production and R&D
+        
+        Following C++ model (fun_KS_firm1.h):
+        - _L1d = _L1dRD + ceil(_Q1 / (_Btau * m1))
+        - _L1dRD = ceil(_RD / w1avg[t-1])
+        - _RD = nu * _S1[t-1] (R&D based on PAST sales, not current)
         """
-        m1 = self.params.get('m1', 1.0)  # Labor productivity
-        nu = self.params.get('nu', 0.04)  # R&D share
-        L1rdMax = self.params.get('L1rdMax', 0.2)  # Max R&D share
+        m1 = self.params.get('m1', 1.0)
+        nu = self.params.get('nu', 0.04)  # R&D share of sales
         
-        # Production workers needed
-        L_prod = self.output / m1 if m1 > 0 else 0
+        # Production workers needed (based on current orders)
+        if self.labor_productivity_output > 0:
+            L_prod = self.output / (self.labor_productivity_output * m1)
+        else:
+            L_prod = 0
         
-        # R&D workers as share of production workers
-        L_rd = min(nu * L_prod, L1rdMax * L_prod)
+        # R&D workers based on PAST sales (C++ uses VL("_S1", 1))
+        # This ensures Firm1 maintains R&D workforce even when orders are zero
+        if hasattr(self, 'sales_history') and len(self.sales_history) > 0:
+            past_sales = self.sales_history[-1]
+        else:
+            # Use past revenue as proxy (initially set to positive value)
+            past_sales = self.revenue
+        
+        if past_sales > 0:
+            # R&D expenditure = nu * past_sales
+            rd_expenditure = nu * past_sales
+            # R&D workers = RD / avg_wage
+            L_rd = rd_expenditure / self.avg_wage if self.avg_wage > 0 else 0
+        else:
+            L_rd = 0
         
         self.labor_demand = L_prod + L_rd
         self.rd_workers = L_rd
@@ -236,6 +257,11 @@ class Firm1:
         """
         # Revenue from sales
         self.revenue = self.sales * self.price
+        
+        # Track sales history for R&D calculation (C++ uses VL("_S1", 1))
+        self.sales_history.append(self.sales)
+        if len(self.sales_history) > 4:  # Keep only recent history
+            self.sales_history.pop(0)
         
         # Costs
         total_costs = self.wage_bill + self.rd_expenditure
