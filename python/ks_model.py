@@ -173,6 +173,12 @@ class KSModel:
         c10 = INIWAGE / (Btau0 * m1)  # Initial unit cost
         p10 = (1 + mu1) * c10  # Initial price
         
+        # Calculate initial demand for sector 1 (needed for sales history)
+        Ls0 = self.params.get('Ls0', 1000)
+        eta = self.params.get('eta', 20)
+        K0 = Ls0 * INIWAGE / ((1 + self.params.get('mu20', 0.35)) * (INIWAGE / INIPROD))
+        D10 = K0 / (m2 * eta)  # Initial demand for machines
+        
         # Store critical initial values in params (C++ lines 516-518)
         self.params.set('Btau0', Btau0)
         self.params.set('pK0', p10)  # Initial capital goods price
@@ -192,9 +198,14 @@ class KSModel:
             firm.market_share = 1.0 / F10  # Fair share
             firm.competitiveness = 1.0
             
-            # Initialize with some past revenue for R&D calculations
-            # Assume initial steady state revenue
-            firm.revenue = p10 * 100  # Placeholder, will be updated
+            # Initialize sales history for R&D calculations
+            # Use initial demand D10 distributed among firms
+            # This will be retrieved later at line 238
+            initial_sales = D10 / F10  # Fair share of initial demand
+            initial_revenue = initial_sales * p10
+            firm.revenue = initial_revenue
+            # Also populate sales_history so R&D uses correct past sales
+            firm.sales_history = [initial_sales]  # Past sales (units, not $)
             
             self.firms1.append(firm)
     
@@ -308,6 +319,11 @@ class KSModel:
             firm.market_share = 1.0 / F20  # Fair share
             firm.competitiveness = 1.0
             firm.quality = 1.0
+            
+            # CRITICAL FIX: Set initial labor_demand consistent with planned output at u utilization
+            # This prevents massive firing in period 1
+            # Labor demand = output_planned / productivity
+            firm.labor_demand = firm.output_planned / INIPROD
             firm.life_cycle = 3  # Start as incumbent
             
             self.firms2.append(firm)
@@ -343,7 +359,6 @@ class KSModel:
         """
         # Get calculated initial labor demands (from _initialize_firms2)
         Ld10 = self.params.get('Ld10', 200)  # Total labor demand sector 1
-        Ld20 = self.params.get('Ld20', 800)  # Total labor demand sector 2
         D10 = self.params.get('D10', 37)     # Production demand sector 1
         
         m1 = self.params.get('m1', 1.0)
@@ -365,11 +380,9 @@ class KSModel:
             firm.labor_demand = labor_per_firm1
             firm.labor_actual = labor_per_firm1
         
-        # Distribute labor among Firm2 firms
-        labor_per_firm2 = Ld20 / F2 if F2 > 0 else 0
-        for firm in self.firms2:
-            firm.labor_demand = labor_per_firm2
-            firm.labor_actual = labor_per_firm2
+        # For Firm2, use the labor_demand already set during initialization
+        # (which accounts for u utilization) - DO NOT override it here
+        # This is already correctly set in _initialize_firms2 based on output_planned
         
         # Shuffle workers for random assignment
         available_workers = list(self.workers)
@@ -381,7 +394,9 @@ class KSModel:
         
         # Assign workers to Firm2 first (largest employer)
         for firm in self.firms2:
-            n_workers_needed = int(firm.labor_actual)
+            # Use the labor_demand set during initialization (accounts for u utilization)
+            n_workers_needed = int(firm.labor_demand)
+            firm.labor_actual = n_workers_needed
             for _ in range(n_workers_needed):
                 if worker_idx < len(available_workers):
                     worker = available_workers[worker_idx]
