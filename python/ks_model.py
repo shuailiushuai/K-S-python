@@ -449,6 +449,9 @@ class KSModel:
             firm.plan_production(t)
             firm.determine_labor_demand(t)
         
+        # 5.5. Handle firing decisions (before workers apply)
+        self.labor_market.handle_firing(t)
+        
         # 6. Workers submit job applications
         for worker in self.workers:
             worker.apply_for_jobs(t, self.labor_market)
