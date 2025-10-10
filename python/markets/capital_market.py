@@ -203,8 +203,9 @@ class CapitalMarket:
                     firm2.vintages.append(vintage)
                     firm2.capital_stock += machines_delivered
                     
-                    # Update supplier
-                    supplier.output -= machines_delivered
+                    # Update supplier SALES (not output!)
+                    # Output should remain as what was produced
+                    # supplier.output -= machines_delivered  # BUG: This zeros output!
                     supplier.sales += machines_delivered
                     
                     self.total_deliveries += machines_delivered
