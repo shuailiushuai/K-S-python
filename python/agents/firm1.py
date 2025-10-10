@@ -66,7 +66,9 @@ class Firm1:
         self.workers = []  # List of Worker objects
         self.wage_bill = 0.0
         self.avg_wage = params.get('w0min', 1.0)
-        self.rd_workers = 0.0  # Workers in R&D
+        self.rd_labor_demand = 0.0  # R&D labor DEMAND (before allocation)
+        self.rd_workers = 0  # R&D workers ALLOCATED (after sector allocation)
+        self.production_workers = 0  # Production workers ALLOCATED (after sector allocation)
         
         # R&D variables
         self.rd_expenditure = 0.0
@@ -216,41 +218,44 @@ class Firm1:
         else:
             L_rd = 0
         
+        # Total labor demand
         self.labor_demand = L_prod + L_rd
-        self.rd_workers = L_rd
+        
+        # Store R&D labor DEMAND (not allocation - that's done by sector later)
+        self.rd_labor_demand = L_rd
     
     def produce(self, t: int):
         """
         Produce machines with actual labor hired
         
         Following C++ model (_Q1e equation, fun_KS_firm1.h lines 411-440):
-        - Allocate workers between R&D and production
+        - Use R&D and production workers allocated by sector-level L1rd equation
         - Adjust output based on available production workers
         - Ensure output is never negative
+        
+        NOTE: rd_workers and production_workers are now set by the sector-level
+        labor allocation in labor_market.allocate_sector1_rd_labor()
         """
         m1 = self.params.get('m1', 1.0)
-        L1rdMax = self.params.get('L1rdMax', 0.2)  # Max fraction of workers in R&D
         
-        # First, limit R&D workers to what we actually have and maximum share
-        max_rd_workers = min(self.labor_actual, 
-                            self.labor_actual * L1rdMax,
-                            self.rd_workers)
-        actual_rd_workers = max(0, max_rd_workers)
+        # Use the sector-allocated production workers
+        # These are set by allocate_sector1_rd_labor() after hiring
+        if not hasattr(self, 'production_workers'):
+            # Fallback if sector allocation hasn't run yet (shouldn't happen)
+            L1rdMax = self.params.get('L1rdMax', 0.2)
+            max_rd = min(self.labor_actual, self.labor_actual * L1rdMax, 
+                        getattr(self, 'rd_workers', 0))
+            self.rd_workers = max(0, max_rd)
+            self.production_workers = max(0, self.labor_actual - self.rd_workers)
         
-        # Production workers are what remains after R&D allocation
-        production_workers = max(0, self.labor_actual - actual_rd_workers)
-        
-        # Calculate what can be produced with available production workers
-        max_output = production_workers * self.labor_productivity_output * m1
+        # Calculate what can be produced with allocated production workers
+        max_output = self.production_workers * self.labor_productivity_output * m1
         
         # Actual output is minimum of planned and producible
         # C++ uses max(output, 0) at line 440 to ensure non-negative
         self.output = max(0, min(self.output, max_output))
         
-        # Update actual R&D workers used
-        self.rd_workers = actual_rd_workers
-        
-        # Update machine productivity from R&D
+        # Update machine productivity from R&D (using allocated rd_workers)
         if t > 1:  # After initialization
             new_A, new_B = self.do_rd(t)
             self.machine_productivity = new_A

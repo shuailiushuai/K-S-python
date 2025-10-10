@@ -490,6 +490,10 @@ class KSModel:
         self.labor_market.firms_post_vacancies(t)
         self.labor_market.match_workers_to_jobs(t)
         
+        # 7.25. Allocate R&D and production workers in capital-good sector
+        # This is the critical L1rd equation - MUST happen after hiring
+        self.labor_market.allocate_sector1_rd_labor()
+        
         # 7.5. Banks collect deposits and allocate credit to firms
         self.financial_market.process_credit_requests(t)
         
