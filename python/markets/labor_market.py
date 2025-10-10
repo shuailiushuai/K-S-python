@@ -397,8 +397,8 @@ class LaborMarket:
             return
         
         elif flagFireRule == 2:
-            # Fire only if downsizing
-            if firm.labor_demand < len(firm.workers):
+            # Fire only if downsizing significantly
+            if firm.labor_demand < len(firm.workers) * 0.8:
                 n_fire = len(firm.workers) - int(firm.labor_demand)
                 self._fire_workers(firm, n_fire, 2)
         
@@ -409,11 +409,10 @@ class LaborMarket:
                 self._fire_workers(firm, n_fire, 2)
         
         elif flagFireRule == 4:
-            # Fire if sufficient payback achieved
-            b = self.params.get('b', 20)
-            # Simplified: fire if workers are underutilized
-            if firm.labor_demand < len(firm.workers) * 0.8:
-                n_fire = len(firm.workers) - int(firm.labor_demand)
+            # Fire only if labor demand is significantly lower (< 50% utilization)
+            # This prevents excessive firing that leads to death spiral
+            if len(firm.workers) > 0 and firm.labor_demand < len(firm.workers) * 0.5:
+                n_fire = len(firm.workers) - max(1, int(firm.labor_demand))
                 self._fire_workers(firm, n_fire, 2)
         
         else:  # flagFireRule == 5
