@@ -138,8 +138,12 @@ class CapitalMarket:
     def deliver_machines(self, t: int):
         """
         Deliver ordered machines and update capital stock
+        
+        Machines are delivered immediately after production, even if supplier
+        couldn't produce the full order due to labor constraints.
         """
         self.total_deliveries = 0.0
+        m2 = self.params.get('m2', 1.0)
         
         for firm2 in self.firms2:
             if not hasattr(firm2, 'pending_orders') or not firm2.pending_orders:
@@ -152,9 +156,13 @@ class CapitalMarket:
                 supplier = order['supplier']
                 machines_ordered = order['machines']
                 
-                # Deliver if supplier has produced them
-                if supplier.output >= machines_ordered:
-                    # Create new vintage
+                # Deliver what the supplier has produced (may be partial)
+                # In the C++ model, machines are delivered after production
+                if supplier.output > 0:
+                    # Deliver the minimum of what was ordered and what was produced
+                    machines_delivered = min(machines_ordered, supplier.output)
+                    
+                    # Create new vintage with delivered machines
                     vintage_id = t * 10000 + supplier.firm_id
                     
                     vintage = Vintage(
@@ -162,20 +170,20 @@ class CapitalMarket:
                         birth_time=t,
                         supplier_id=supplier.firm_id,
                         productivity=supplier.machine_productivity,
-                        machines=int(machines_ordered),
+                        machines=int(machines_delivered),
                         price=supplier.price
                     )
                     
                     firm2.vintages.append(vintage)
-                    firm2.capital_stock += machines_ordered
+                    firm2.capital_stock += machines_delivered
                     
                     # Update supplier
-                    supplier.output -= machines_ordered
-                    supplier.sales += machines_ordered
+                    supplier.output -= machines_delivered
+                    supplier.sales += machines_delivered
                     
-                    self.total_deliveries += machines_ordered
+                    self.total_deliveries += machines_delivered
                     
-                    # Mark for removal
+                    # Mark for removal (even if partial delivery)
                     orders_to_remove.append(i)
             
             # Remove delivered orders

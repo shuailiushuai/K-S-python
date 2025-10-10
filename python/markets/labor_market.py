@@ -385,8 +385,11 @@ class LaborMarket:
     def _firm2_firing(self, firm, t: int):
         """
         Handle Firm2 firing based on flagFireRule
+        
+        The firing logic should be more conservative to avoid excessive unemployment.
         """
         flagFireRule = self.params.get('flagFireRule', 4)
+        theta = self.params.get('theta', 0.0)  # Hiring slack
         
         if flagFireRule == 0:
             # Never fire (except retirement)
@@ -399,8 +402,8 @@ class LaborMarket:
         elif flagFireRule == 2:
             # Fire only if downsizing significantly
             if firm.labor_demand < len(firm.workers) * 0.8:
-                n_fire = len(firm.workers) - int(firm.labor_demand)
-                self._fire_workers(firm, n_fire, 2)
+                n_fire = len(firm.workers) - int(firm.labor_demand * (1 + theta))
+                self._fire_workers(firm, max(0, n_fire), 2)
         
         elif flagFireRule == 3:
             # Fire if losses
@@ -409,14 +412,18 @@ class LaborMarket:
                 self._fire_workers(firm, n_fire, 2)
         
         elif flagFireRule == 4:
-            # Fire only if labor demand is significantly lower (< 50% utilization)
-            # This prevents excessive firing that leads to death spiral
-            if len(firm.workers) > 0 and firm.labor_demand < len(firm.workers) * 0.5:
-                n_fire = len(firm.workers) - max(1, int(firm.labor_demand))
-                self._fire_workers(firm, n_fire, 2)
+            # Fire to match labor demand with slack (theta)
+            # This is the standard firing rule from the C++ model
+            if len(firm.workers) > 0:
+                # Allow slack in hiring: firms keep theta % extra workers
+                target_workers = firm.labor_demand * (1 + theta)
+                if len(firm.workers) > target_workers:
+                    # Fire excess workers beyond the slack
+                    n_fire = int(len(firm.workers) - target_workers)
+                    self._fire_workers(firm, max(0, n_fire), 2)
         
         else:  # flagFireRule == 5
-            # Always fire when contract ends
+            # Fire when contract ends
             Tc = self.params.get('Tc', 1)
             workers_to_fire = [w for w in firm.workers if w.tenure >= Tc]
             if workers_to_fire:
@@ -428,12 +435,16 @@ class LaborMarket:
     
     def _firm1_firing(self, firm, t: int):
         """
-        Handle Firm1 firing (simplified)
+        Handle Firm1 firing with slack parameter
         """
-        # Fire if labor demand is less than current workers
-        if firm.labor_demand < len(firm.workers):
-            n_fire = len(firm.workers) - int(firm.labor_demand)
-            self._fire_workers(firm, n_fire, 1)
+        theta = self.params.get('theta', 0.0)  # Hiring slack
+        
+        # Fire only if current workers exceed demand + slack
+        if len(firm.workers) > 0:
+            target_workers = firm.labor_demand * (1 + theta)
+            if len(firm.workers) > target_workers:
+                n_fire = int(len(firm.workers) - target_workers)
+                self._fire_workers(firm, max(0, n_fire), 1)
     
     def _fire_workers(self, firm, n_fire: int, sector: int):
         """

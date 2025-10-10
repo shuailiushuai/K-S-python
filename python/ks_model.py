@@ -539,65 +539,194 @@ class KSModel:
     def _exit_firms(self):
         """Remove firms that should exit the market"""
         f2min = self.params.get('f2min', 0.0001)  # Minimum market share
+        n1 = self.params.get('n1', 4)  # Market participation period for Firm1
         
         # Check Firm2 exits
         surviving_firms2 = []
         for firm in self.firms2:
-            if firm.market_share > f2min and firm.net_worth > 0:
-                surviving_firms2.append(firm)
-            else:
+            should_exit = False
+            
+            # Exit if bankrupt (negative net worth)
+            if firm.net_worth < 0:
+                should_exit = True
+            # Exit if incumbent firm with near-zero market share
+            elif self.t >= firm.entry_time + n1 and firm.market_share < f2min:
+                should_exit = True
+            
+            if should_exit:
                 # Handle exit: fire workers, default on loans
-                firm.exit(self.labor_market, self.financial_market)
+                if hasattr(firm, 'exit'):
+                    firm.exit(self.labor_market, self.financial_market)
+                else:
+                    # Simplified exit: just fire workers
+                    for worker in firm.workers:
+                        worker.employed = False
+                        worker.employer = None
+                        worker.unemployment_duration = 0
                 self.exit_firms2 += 1
+            else:
+                surviving_firms2.append(firm)
         
         self.firms2 = surviving_firms2
         
         # Check Firm1 exits (similar logic)
         surviving_firms1 = []
         for firm in self.firms1:
-            if firm.market_share > f2min and firm.net_worth > 0:
-                surviving_firms1.append(firm)
-            else:
-                firm.exit(self.labor_market, self.financial_market)
+            should_exit = False
+            
+            # Exit if bankrupt
+            if firm.net_worth < 0:
+                should_exit = True
+            # Exit if incumbent with no clients for n1 periods
+            elif self.t >= firm.entry_time + n1:
+                # Check if firm has had any clients in recent periods
+                if len(firm.clients) == 0:
+                    should_exit = True
+            
+            if should_exit:
+                if hasattr(firm, 'exit'):
+                    firm.exit(self.labor_market, self.financial_market)
+                else:
+                    for worker in firm.workers:
+                        worker.employed = False
+                        worker.employer = None
+                        worker.unemployment_duration = 0
                 self.exit_firms1 += 1
+            else:
+                surviving_firms1.append(firm)
         
         self.firms1 = surviving_firms1
     
     def _entry_firms(self, t: int):
-        """Create new entrant firms based on market conditions"""
-        # Entry rate depends on market conditions (omicron parameter)
-        # and number of incumbent firms
+        """
+        Create new entrant firms based on market conditions
+        
+        Entry follows the C++ model logic using market conditions (MC) 
+        and various parameters.
+        """
+        # Get parameters
+        omicron = self.params.get('omicron', 0.5)  # Entry sensitivity to market conditions
+        x2inf = self.params.get('x2inf', -0.15)  # Entry distribution lower bound
+        x2sup = self.params.get('x2sup', 0.15)  # Entry distribution upper bound
+        stick = self.params.get('stick', 0.0)  # Stickiness parameter
         
         # Firm1 entry
         F1min = self.params.get('F1min', 10)
         F1max = self.params.get('F1max', 50)
+        F10 = self.params.get('F10', 20)  # Initial number
+        
         if len(self.firms1) < F1max:
-            # Determine number of entrants (simplified)
-            n_entry = max(0, int((F1min - len(self.firms1)) * 0.1))
-            for _ in range(n_entry):
+            # Calculate market conditions change (simplified - use sales growth)
+            if t > 1:
+                current_sales = sum(f.sales for f in self.firms1)
+                # Use a simple proxy for market conditions
+                mc_change = min(max(np.random.uniform(x2inf, x2sup), x2inf), x2sup)
+            else:
+                mc_change = 0.0
+            
+            # Entry formula from C++ model (line 140-141 in fun_KS_capital.h)
+            entry_rate = (1 - omicron) * np.random.uniform(x2inf, x2sup) + \
+                         omicron * mc_change
+            
+            n_entry_base = max(0, int(round(len(self.firms1) * entry_rate)))
+            
+            # Apply stickiness shock (line 144 in C++)
+            stickiness_adj = int(np.random.random() * stick * 
+                               ((len(self.firms1) - self.exit_firms1) / F10 - 1) * F10)
+            n_entry = max(0, n_entry_base - stickiness_adj)
+            
+            # Enforce min constraint
+            if len(self.firms1) - self.exit_firms1 + n_entry < F1min:
+                n_entry = F1min - len(self.firms1) + self.exit_firms1
+            
+            # Enforce max constraint
+            if len(self.firms1) + n_entry > F1max:
+                n_entry = F1max - len(self.firms1)
+            
+            # Create entrants
+            for _ in range(max(0, n_entry)):
+                # Entry with technology from incumbents (imitation)
+                if self.firms1:
+                    # Draw technology from best firms
+                    best_firms = sorted(self.firms1, 
+                                      key=lambda f: f.machine_productivity, 
+                                      reverse=True)[:5]
+                    template = np.random.choice(best_firms)
+                    machine_prod = template.machine_productivity * (0.8 + 0.4 * np.random.random())
+                else:
+                    machine_prod = 1.0
+                
                 firm = Firm1(
-                    firm_id=len(self.firms1),
+                    firm_id=len(self.firms1) + 1000,  # High ID to avoid conflicts
                     params=self.params,
-                    initial_net_worth=self.params.get('NW10', 100) * 0.5,
+                    initial_net_worth=self.params.get('NW10', 100) * (0.5 + np.random.random()),
                     entrant=True,
                     entry_time=t
                 )
+                firm.machine_productivity = machine_prod
                 self.firms1.append(firm)
                 self.entry_firms1 += 1
         
         # Firm2 entry
         F2min = self.params.get('F2min', 50)
         F2max = self.params.get('F2max', 200)
+        F20 = self.params.get('F20', 100)
+        
         if len(self.firms2) < F2max:
-            n_entry = max(0, int((F2min - len(self.firms2)) * 0.1))
-            for _ in range(n_entry):
+            # Similar logic for Firm2
+            if t > 1:
+                mc_change = min(max(np.random.uniform(x2inf, x2sup), x2inf), x2sup)
+            else:
+                mc_change = 0.0
+            
+            entry_rate = (1 - omicron) * np.random.uniform(x2inf, x2sup) + \
+                         omicron * mc_change
+            
+            n_entry_base = max(0, int(round(len(self.firms2) * entry_rate)))
+            
+            stickiness_adj = int(np.random.random() * stick * 
+                               ((len(self.firms2) - self.exit_firms2) / F20 - 1) * F20)
+            n_entry = max(0, n_entry_base - stickiness_adj)
+            
+            # Enforce constraints
+            if len(self.firms2) - self.exit_firms2 + n_entry < F2min:
+                n_entry = F2min - len(self.firms2) + self.exit_firms2
+            
+            if len(self.firms2) + n_entry > F2max:
+                n_entry = F2max - len(self.firms2)
+            
+            # Create entrants
+            for _ in range(max(0, n_entry)):
+                # Entrants need initial capital
+                m2 = self.params.get('m2', 1.0)
+                initial_machines = int(5 + np.random.exponential(5))  # Small initial size
+                
                 firm = Firm2(
-                    firm_id=len(self.firms2),
+                    firm_id=len(self.firms2) + 1000,
                     params=self.params,
-                    initial_net_worth=self.params.get('NW20', 100) * 0.5,
+                    initial_net_worth=self.params.get('NW20', 100) * (0.5 + np.random.random()),
                     entrant=True,
                     entry_time=t
                 )
+                
+                # Give entrant some initial capital (small vintage)
+                if self.firms1:
+                    supplier = np.random.choice(self.firms1)
+                    from agents.vintage import Vintage
+                    vintage = Vintage(
+                        vintage_id=t * 10000 + firm.firm_id,
+                        birth_time=t,
+                        supplier_id=supplier.firm_id,
+                        productivity=supplier.machine_productivity,
+                        machines=initial_machines,
+                        price=supplier.price
+                    )
+                    firm.vintages.append(vintage)
+                    firm.capital_stock = initial_machines
+                    firm.suppliers.append(supplier)
+                    firm.main_supplier = supplier
+                    supplier.clients.append(firm)
+                
                 self.firms2.append(firm)
                 self.entry_firms2 += 1
     
