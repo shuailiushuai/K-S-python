@@ -584,6 +584,12 @@ class KSModel:
         
         # Entry of new firms based on market conditions
         self._entry_firms(t)
+        
+        # CRITICAL: Update market references after entry/exit
+        # When firms exit and new ones enter, the firm lists are replaced
+        # but markets still hold references to old firm objects.
+        # We must update these references to prevent stale pointers.
+        self._update_market_references()
     
     def _exit_firms(self):
         """Remove firms that should exit the market"""
@@ -778,6 +784,34 @@ class KSModel:
                 
                 self.firms2.append(firm)
                 self.entry_firms2 += 1
+    
+    def _update_market_references(self):
+        """
+        Update market references to firm lists after entry/exit
+        
+        This is CRITICAL because when firms exit, the firms1/firms2 lists are replaced
+        with new lists containing only surviving firms. Markets that hold references
+        to the old lists will have stale pointers to exited firms, causing workers
+        to be "lost" and production to stop.
+        
+        This function synchronizes all market references with the current firm lists.
+        """
+        # Update labor market references
+        self.labor_market.firms1 = self.firms1
+        self.labor_market.firms2 = self.firms2
+        
+        # Update goods market references
+        self.goods_market.firms2 = self.firms2
+        
+        # Update capital market references
+        self.capital_market.firms1 = self.firms1
+        self.capital_market.firms2 = self.firms2
+        
+        # Update financial market references (if it holds firm lists)
+        if hasattr(self.financial_market, 'firms1'):
+            self.financial_market.firms1 = self.firms1
+        if hasattr(self.financial_market, 'firms2'):
+            self.financial_market.firms2 = self.firms2
     
     def get_statistics(self) -> Dict[str, Any]:
         """
