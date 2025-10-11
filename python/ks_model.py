@@ -113,6 +113,14 @@ class KSModel:
         # Assign initial employment (workers to firms) for full employment start
         self._assign_initial_employment()
         
+        # Initialize sectoral average wages for pricing
+        # Following C++ model initialization (lines 523, 529):
+        # WRITELS( cur1, "w1avg", INIWAGE, -1 )
+        # WRITELS( cur2, "w2avg", INIWAGE, -1 )
+        INIWAGE = 1.0
+        self.params.set('w1avg_prev', INIWAGE)
+        self.params.set('w2avg_prev', INIWAGE)
+        
         print(f"Model initialized: {len(self.firms1)} capital firms, "
               f"{len(self.firms2)} consumption firms, "
               f"{len(self.workers)} workers, {len(self.banks)} banks")
