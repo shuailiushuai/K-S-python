@@ -1,0 +1,145 @@
+# K+S Model - Baseline Configuration
+# Based on Cent_wage-Baseline_v2.lsd
+
+# Country-level parameters
+country:
+  # Model flags
+  flagCons: 2                    # Consumption mode (0=none, 1=full, 2=gradual recovery)
+  flagGovExp: 2                  # Government expenditure (0=work-or-die, 1=min+growth, 2=benefits, 3=counter-cyclical)
+  flagFiscalRule: 0              # Fiscal rule (0=none, 1=deficit, 2=debt, 3=combined)
+  flagTax: 1                     # Tax system (0=none, 1=basic, 2=full with dividends)
+  flagWorkerLBU: 1               # Worker learning-by-using (0=none, 1=vintage, 2=tenure, 3=both)
+  flagWorkerSkProd: 3            # Skills affect productivity (0=none, 1=vintage, 2=tenure, 3=both)
+  
+  # Regime change
+  TregChg: 9999                  # Regime change time (disabled by default)
+  
+  # Government parameters
+  gG: 0.01                       # Government spending growth rate
+  Crec: 0.5                      # Savings recovery rate
+  tr: 0.2                        # Tax rate (20%)
+  mLim: 0.05                     # Productivity growth limit
+  mPer: 4                        # Productivity moving average periods
+
+# Capital goods sector
+capital:
+  # Sector size
+  F10: 20                        # Initial number of firms
+  F1min: 10                      # Minimum number of firms
+  F1max: 100                     # Maximum number of firms
+  
+  # Technology
+  m1: 1.0                        # Machine output per period
+  mu1: 0.1                       # Mark-up (10%)
+  
+  # R&D parameters
+  nu: 0.04                       # R&D investment rate (4% of sales)
+  xi: 1.0                        # R&D success probability scale
+  zeta1: 0.5                     # Innovation probability parameter
+  alpha1: 3.0                    # Innovation distribution (alpha)
+  beta1: 3.0                     # Innovation distribution (beta)
+  zeta2: 0.3                     # Imitation probability parameter
+  
+  # Innovation bounds
+  x1inf: 0.1                     # Minimum innovation improvement
+  x1sup: 0.3                     # Maximum innovation improvement
+  
+  # Entry/exit
+  NW1min: 0.0                    # Minimum net worth for survival
+
+# Consumption goods sector
+consumption:
+  # Sector size
+  F20: 50                        # Initial number of firms
+  F2min: 20                      # Minimum number of firms
+  F2max: 200                     # Maximum number of firms
+  
+  # Technology
+  m2: 1.0                        # Machine output per period
+  b: 3.0                         # Payback period
+  eta: 20                        # Machine lifetime (periods)
+  
+  # Pricing and competition
+  mu20: 0.2                      # Initial mark-up (20%)
+  upsilon: 0.04                  # Mark-up adjustment rate
+  f2min: 0.001                   # Exit market share threshold (0.1%)
+  
+  # Demand expectation weights (sum should be 1.0)
+  omega1: 0.4                    # Past demand weight
+  omega2: 0.3                    # Past demand weight (t-1)
+  omega3: 0.3                    # Past demand weight (t-2)
+  
+  # Wage setting
+  psi1: 1.0                      # Base wage factor
+  psi2: 0.0                      # Market share premium
+  psi3: 0.0                      # Profits premium
+  
+  # Entry/exit
+  NW2min: 0.0                    # Minimum net worth for survival
+  
+  # Investment
+  iota: 0.1                      # Desired capacity utilization buffer
+
+# Financial sector
+financial:
+  # Sector size
+  B: 5                           # Number of banks
+  
+  # Capital adequacy
+  tauB: 0.08                     # Minimum capital adequacy ratio (8%, Basel)
+  lambda: 90.0                   # Maximum leverage ratio (90%)
+  
+  # Interest rates
+  rT: 0.03                       # Target prime rate (3%)
+  muBonds: -0.01                 # Bond rate spread (-1%)
+  muD: -0.01                     # Deposit rate spread (-1%)
+  muDeb: 0.02                    # Debt rate spread (+2%)
+  muRes: -0.01                   # Reserve rate spread (-1%)
+  
+  # Reserve requirements
+  tauB_reserve: 0.05             # Reserve requirement (5%)
+  
+  # Taylor rule (if used)
+  phi1: 1.5                      # Inflation response
+  phi2: 0.5                      # Output gap response
+  
+  # Bank parameters
+  EqB0: 0.15                     # Initial bank equity ratio
+  alphaB: 2.0                    # Bank size distribution parameter
+
+# Labor market
+labor:
+  # Labor force
+  Ls0: 10000                     # Initial labor supply
+  Lscale: 10                     # Labor scaling factor (for computational efficiency)
+  
+  # Contracts
+  Tc: 12                         # Work contract term (periods)
+  Tr: 480                        # Work life duration (40 years at 12 periods/year)
+  
+  # Wages
+  w0min: 0.5                     # Minimum wage (absolute floor)
+  psi0: 0.02                     # Wage adjustment rate
+  phi: 0.5                       # Unemployment benefit rate (50% of avg wage)
+  
+  # Skills
+  sigma: 1.0                     # Initial vintage skills factor
+  kappa: 0.5                     # Share of skills from vintage vs tenure
+  lambda1: 0.02                  # Learning rate when employed
+  lambda2: 0.01                  # Learning rate when unemployed (training)
+  lambda3: -0.01                 # Skills deterioration when unemployed
+  
+  # Job search
+  omega: 2                       # Number of firms to apply (employed)
+  omegaU: 5                      # Number of firms to apply (unemployed)
+  chi: 0.5                       # Probability of applying (employed)
+  
+  # Training
+  theta: 0.2                     # Share of unemployed in training
+  pi_train: 0.1                  # Training cost per worker (relative to min wage)
+
+# Simulation settings
+simulation:
+  periods: 100                   # Number of periods to simulate
+  seed: 42                       # Random seed for reproducibility
+  warmup: 20                     # Warm-up periods before recording
