@@ -33,6 +33,8 @@ from .bank import Bank
 from .labor import LaborMarket, create_application
 from .country import Country, CapitalSector, ConsumptionSector, FinancialSector
 from .random_engine import random_engine
+from .statistics import StatisticsCollector
+from .config_parser import LSDConfigParser, parse_lsd_config, load_scenario
 
 __all__ = [
     'Agent',
@@ -48,4 +50,8 @@ __all__ = [
     'FinancialSector',
     'create_application',
     'random_engine',
+    'StatisticsCollector',
+    'LSDConfigParser',
+    'parse_lsd_config',
+    'load_scenario',
 ]
