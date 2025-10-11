@@ -113,6 +113,14 @@ class KSModel:
         # Assign initial employment (workers to firms) for full employment start
         self._assign_initial_employment()
         
+        # Initialize sectoral average wages for pricing
+        # Following C++ model initialization (lines 523, 529):
+        # WRITELS( cur1, "w1avg", INIWAGE, -1 )
+        # WRITELS( cur2, "w2avg", INIWAGE, -1 )
+        INIWAGE = 1.0
+        self.params.set('w1avg_prev', INIWAGE)
+        self.params.set('w2avg_prev', INIWAGE)
+        
         print(f"Model initialized: {len(self.firms1)} capital firms, "
               f"{len(self.firms2)} consumption firms, "
               f"{len(self.workers)} workers, {len(self.banks)} banks")
@@ -587,12 +595,17 @@ class KSModel:
         
         Following C++ model, Firm1 pricing uses w1avg from previous period.
         """
-        # Calculate sector 1 average wage
+        # Calculate sector 1 average wage  
         sector1_workers = [w for w in self.workers if w.employed and w.employer in self.firms1]
         if sector1_workers:
             w1avg = sum(w.wage for w in sector1_workers) / len(sector1_workers)
         else:
-            w1avg = self.params.get('w0min', 1.0)
+            # Use sector 2 wage as proxy (C++ line 572: use w2avg if no workers)
+            sector2_workers = [w for w in self.workers if w.employed and w.employer in self.firms2]
+            if sector2_workers:
+                w1avg = sum(w.wage for w in sector2_workers) / len(sector2_workers)
+            else:
+                w1avg = self.params.get('w0min', 1.0)
         
         # Store current as "previous" for next period
         self.params.set('w1avg_prev', w1avg)
@@ -602,7 +615,11 @@ class KSModel:
         if sector2_workers:
             w2avg = sum(w.wage for w in sector2_workers) / len(sector2_workers)
         else:
-            w2avg = self.params.get('w0min', 1.0)
+            # Use sector 1 wage as proxy (symmetric to C++ logic)
+            if sector1_workers:
+                w2avg = sum(w.wage for w in sector1_workers) / len(sector1_workers)
+            else:
+                w2avg = self.params.get('w0min', 1.0)
         
         self.params.set('w2avg_prev', w2avg)
     
