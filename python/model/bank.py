@@ -436,6 +436,51 @@ class Bank(Agent):
         
         return Res, ExRes
     
+    def compute_bad_debt_ratio(self) -> float:
+        """
+        Compute customer firms financial fragility (_Bda)
+        Defined as ratio between accumulated bad debt and total bank assets
+        
+        Returns:
+            Bad debt ratio (financial fragility indicator)
+        """
+        # Losses with bad debt from previous period
+        BadDeb1 = self.read("_BadDeb1", 1)
+        BadDeb2 = self.read("_BadDeb2", 1)
+        total_bad_debt = BadDeb1 + BadDeb2
+        
+        # Total bank assets
+        Loans = self.read("_Loans", 1)
+        BondsB = self.read("_BondsB", 1)
+        Res = self.read("_Res", 1)
+        ExRes = self.read("_ExRes", 1)
+        total_assets = Loans + BondsB + Res + ExRes
+        
+        Bda = total_bad_debt / total_assets if total_assets > 0 else 0.0
+        
+        self.write("_Bda", Bda)
+        self._Bda = Bda
+        return Bda
+    
+    def compute_dividends(self, dB: float) -> float:
+        """
+        Compute dividends to pay by bank (_DivB)
+        
+        Args:
+            dB: Dividend payout ratio
+        
+        Returns:
+            Dividends amount
+        """
+        PiB = self.read("_PiB", 0)
+        TaxB = self.read("_TaxB", 0)
+        
+        DivB = max(dB * (PiB - TaxB), 0.0)
+        
+        self.write("_DivB", DivB)
+        self._DivB = DivB
+        return DivB
+    
     def compute_market_share(self) -> float:
         """
         Compute bank market share based on number of clients

@@ -3,14 +3,15 @@ Validation Test Suite for K+S Model
 Tests to ensure Python implementation matches C++ original
 """
 
+import sys
+from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from model import Country, load_scenario
+from model import Country
 from model.random_engine import random_engine
-import sys
-from pathlib import Path
+from config import load_scenario
 
 
 def test_determinism():

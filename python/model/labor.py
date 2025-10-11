@@ -629,3 +629,50 @@ def create_application(worker: Worker) -> Application:
     app.Te = worker.read("_Te", 1)     # Employment tenure
     
     return app
+
+
+def compute_bonus_total(workers: List[Worker], Lscale: float) -> float:
+    """
+    Compute total bonuses paid (Bon equation from fun_KS_labor.h)
+    RESULT(SUM("_Bon") * V("Lscale"))
+    
+    Args:
+        workers: List of worker agents
+        Lscale: Labor scaling factor
+    
+    Returns:
+        Total bonuses
+    """
+    total_bon = sum(getattr(w, '_Bon', 0.0) for w in workers)
+    return total_bon * Lscale
+
+
+def compute_taxes_on_wages(workers: List[Worker]) -> float:
+    """
+    Compute total taxes paid by workers on wages (TaxW equation from fun_KS_labor.h)
+    RESULT(SUM("_TaxW"))
+    
+    Args:
+        workers: List of worker agents
+    
+    Returns:
+        Total wage taxes
+    """
+    return sum(getattr(w, '_TaxW', 0.0) for w in workers)
+
+
+def compute_total_wages(workers: List[Worker], Lscale: float) -> float:
+    """
+    Compute total wages paid (W equation from fun_KS_labor.h)
+    RESULT(SUM("_w") * Lscale)
+    
+    Args:
+        workers: List of worker agents
+        Lscale: Labor scaling factor
+    
+    Returns:
+        Total wages
+    """
+    total_w = sum(getattr(w, '_w', 0.0) for w in workers)
+    return total_w * Lscale
+
