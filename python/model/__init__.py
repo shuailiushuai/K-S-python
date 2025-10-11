@@ -23,3 +23,19 @@ Python implementation ensures:
 
 __version__ = "5.1.3-python"
 __author__ = "Python conversion of K+S model"
+
+from .agent import Agent
+from .worker import Worker
+from .firm1 import Firm1
+from .firm2 import Firm2
+from .vintage import VintageAgent
+from .random_engine import random_engine
+
+__all__ = [
+    'Agent',
+    'Worker',
+    'Firm1',
+    'Firm2',
+    'VintageAgent',
+    'random_engine',
+]
