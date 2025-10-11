@@ -5,7 +5,7 @@ Tests all major components and equations
 """
 
 from model import Country
-from model.config_parser import load_scenario
+from config import load_scenario
 import sys
 
 
