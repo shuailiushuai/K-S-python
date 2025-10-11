@@ -115,6 +115,74 @@ class Bank(Agent):
         self._TC = TC
         return TC
     
+    def compute_credit_scores(self, firms1: List, firms2: List):
+        """
+        Define credit class for bank's clients (_cScores equation)
+        
+        Exactly matches fun_KS_bank.h _cScores equation (lines 383-432)
+        
+        Ranks clients by NW/Sales ratio and assigns credit classes:
+        - Class 1: Top 25% (best creditworthiness)
+        - Class 2: 25-50%
+        - Class 3: 50-75%
+        - Class 4: Bottom 25% (worst creditworthiness)
+        
+        Args:
+            firms1: List of Firm1 clients
+            firms2: List of Firm2 clients
+        """
+        rank1 = []
+        rank2 = []
+        
+        # Rank sector 1 clients
+        for firm in firms1:
+            NW1 = firm.read("_NW1", 1)
+            S1 = firm.read("_S1", 1)
+            nw_to_s = safe_divide(NW1, S1, 0) if NW1 > 0 and S1 > 0 else 0
+            rank1.append(FirmRank(NWtoS=nw_to_s, firm=firm))
+        
+        # Rank sector 2 clients
+        for firm in firms2:
+            NW2 = firm.read("_NW2", 1)
+            S2 = firm.read("_S2", 1)
+            nw_to_s = safe_divide(NW2, S2, 0) if NW2 > 0 and S2 > 0 else 0
+            rank2.append(FirmRank(NWtoS=nw_to_s, firm=firm))
+        
+        # Sort in descending order (higher ratios first)
+        rank1.sort(key=lambda x: x.NWtoS, reverse=True)
+        rank2.sort(key=lambda x: x.NWtoS, reverse=True)
+        
+        i = len(rank1)  # Number of clients in sector 1
+        j = len(rank2)  # Number of clients in sector 2
+        
+        # Assign credit class to sector 1 clients
+        for h, cli in enumerate(rank1):
+            if h < i * 0.25:
+                qc1 = 1
+            elif h < i * 0.5:
+                qc1 = 2
+            elif h < i * 0.75:
+                qc1 = 3
+            else:
+                qc1 = 4
+            cli.firm.write("_qc1", qc1)
+            cli.firm._qc1 = qc1
+        
+        # Assign credit class to sector 2 clients
+        for h, cli in enumerate(rank2):
+            if h < j * 0.25:
+                qc2 = 1
+            elif h < j * 0.5:
+                qc2 = 2
+            elif h < j * 0.75:
+                qc2 = 3
+            else:
+                qc2 = 4
+            cli.firm.write("_qc2", qc2)
+            cli.firm._qc2 = qc2
+        
+        return i + j
+    
     def allocate_credit_sector1(self, firms: List, sector_demand: float) -> Tuple[float, List]:
         """
         Allocate credit to sector 1 firms

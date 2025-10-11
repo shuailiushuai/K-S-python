@@ -319,6 +319,46 @@ class Firm2(Agent):
         
         return EI, SI, EI + SI
     
+    def compute_markup(self, upsilon: float, f2min: float) -> float:
+        """
+        Compute firm's mark-up (_mu2 equation)
+        
+        Exactly matches fun_KS_firm2.h _mu2 equation (lines 546-558)
+        
+        Mark-up adjusts based on market share changes:
+        - Increasing market share → increase mark-up
+        - Decreasing market share → decrease mark-up
+        - Just-entered firms keep initial mark-up
+        
+        Args:
+            upsilon: Mark-up adjustment parameter
+            f2min: Minimum market share threshold
+        
+        Returns:
+            Updated mark-up
+        """
+        # Get past market shares
+        f2_lag1 = self.read("_f2", 1)
+        f2_lag2 = self.read("_f2", 2)
+        mu2_current = self.read("_mu2")
+        
+        # Just entered firms keep initial mark-up
+        if f2_lag1 < f2min or f2_lag2 < f2min:
+            mu2 = mu2_current
+        else:
+            # Adjust based on market share trend
+            if f2_lag2 > 0:
+                mu2 = mu2_current * (1 + upsilon * (f2_lag1 / f2_lag2 - 1))
+            else:
+                mu2 = mu2_current
+        
+        # Ensure non-negative
+        mu2 = max(0, mu2)
+        
+        self.write("_mu2", mu2)
+        self._mu2 = mu2
+        return mu2
+    
     def compute_labor_demand(self, m2: float) -> int:
         """
         Compute desired labor force
