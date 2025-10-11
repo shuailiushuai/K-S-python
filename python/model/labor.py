@@ -55,6 +55,22 @@ class LaborMarket(Agent):
         self._Ltrain = 0                  # Workers in training
         self._Gtrain = 0.0                # Government training expenditure
         
+        # Wage policy
+        self._wMinPol = 0.5               # Policy minimum wage
+        self._wCent = 1.0                 # Centralized wage (if used)
+        self._wU = 0.0                    # Unemployment benefit
+        self._psi1 = 1.0                  # Inflation adjustment parameter
+        self._psi2 = 0.5                  # Productivity adjustment parameter
+        self._psi3 = -0.3                 # Unemployment adjustment parameter
+        
+        # Additional statistics
+        self._sTmax = 1.0                 # Maximum tenure skills
+        self._sTmin = 1.0                 # Minimum tenure skills
+        self._sTsd = 0.0                  # Std dev of tenure skills
+        self._sVsd = 0.0                  # Std dev of vintage skills
+        self._TeAvg = 0.0                 # Average tenure in current job
+        self._dUeB = 0.0                  # Bounded unemployment rate change
+        
         # Applications and offers
         self._applications_sector1 = []  # Sector 1 applications
         self._applications_sector2 = []  # Sector 2 applications by firm
@@ -416,6 +432,178 @@ class LaborMarket(Agent):
             total_openings += openings
         
         return total_openings
+    
+    def compute_wage_aggregates(self, workers: List[Worker]) -> Tuple[float, float, float]:
+        """
+        Compute wage-related aggregate statistics
+        
+        Implements equations: wAvg, wMinPol, wU
+        
+        Args:
+            workers: List of all workers
+        
+        Returns:
+            Tuple of (wAvg, wMinPol, wU)
+        """
+        # wAvg equation: Average wage of employed workers
+        total_wage = 0.0
+        employed_count = 0
+        
+        for worker in workers:
+            if worker.read("_employed", 0):
+                total_wage += worker.read("_w", 0)
+                employed_count += 1
+        
+        if employed_count > 0:
+            self._wAvg = total_wage / employed_count
+        # else keep previous value
+        
+        # wMinPol equation: Policy minimum wage (indexed if enabled)
+        country = self.parent
+        flagIndexMinWage = getattr(country, '_flagIndexMinWage', 0)
+        w0min = self._w0min
+        
+        if flagIndexMinWage != 0:
+            # Get adjustment factors
+            dCPIb_lag = country.read('_inflation', lag=1, default=0)  # Inflation
+            dAb_lag = country.read('_dAb', lag=1, default=0)  # Productivity growth
+            dUeB_lag = self.read('_dUeB', lag=1, default=0)  # Unemployment change
+            
+            # Adjust minimum wage
+            adjustment = (self._psi1 * dCPIb_lag + 
+                         self._psi2 * dAb_lag + 
+                         self._psi3 * dUeB_lag) * flagIndexMinWage
+            
+            self._wMinPol *= (1 + adjustment)
+        
+        # Floor at absolute minimum
+        self._wMinPol = max(self._wMinPol, w0min)
+        
+        # wU equation: Unemployment benefit
+        phi = getattr(country, '_phi', 0.5)  # Benefit replacement rate
+        wAvg_lag = self.read('_wAvg', lag=1, default=self._wAvg)
+        self._wU = phi * wAvg_lag
+        
+        return self._wAvg, self._wMinPol, self._wU
+    
+    def compute_skills_aggregates(self, workers: List[Worker]) -> Tuple[float, float, float]:
+        """
+        Compute skills-related aggregate statistics
+        
+        Implements equation: sAvg (and related: sTavg, sTmax, sTmin, sTsd, sVavg, sVsd)
+        
+        Args:
+            workers: List of all workers
+        
+        Returns:
+            Tuple of (sAvg, sTavg, sVavg)
+        """
+        country = self.parent
+        flagWorkerLBU = getattr(country, '_flagWorkerLBU', 1)
+        
+        if flagWorkerLBU == 0:
+            # No worker-level learning
+            self._sAvg = INISKILL
+            self._sTavg = INISKILL
+            self._sVavg = INISKILL
+            self._sTmax = INISKILL
+            self._sTmin = INISKILL
+            self._sTsd = 0.0
+            self._sVsd = 0.0
+            return INISKILL, INISKILL, INISKILL
+        
+        # Accumulators
+        sum_s = 0.0
+        sum_sT = 0.0
+        sum_sT_sq = 0.0
+        sum_sV = 0.0
+        sum_sV_sq = 0.0
+        sT_max = 0.0
+        sT_min = float('inf')
+        count = 0
+        
+        for worker in workers:
+            s = worker.read("_s", 0)
+            sum_s += s
+            count += 1
+            
+            if flagWorkerLBU >= 2:  # Tenure skills active
+                sT = worker.read("_sT", 0)
+                sum_sT += sT
+                sum_sT_sq += sT ** 2
+                sT_max = max(sT_max, sT)
+                sT_min = min(sT_min, sT)
+            
+            if flagWorkerLBU == 1 or flagWorkerLBU == 3:  # Vintage skills active
+                sV = worker.read("_sV", 0)
+                sum_sV += sV
+                sum_sV_sq += sV ** 2
+        
+        if count > 0:
+            self._sAvg = sum_s / count
+            
+            if flagWorkerLBU >= 2:
+                self._sTavg = sum_sT / count
+                variance_sT = max((sum_sT_sq / count) - (self._sTavg ** 2), 0)
+                self._sTsd = math.sqrt(variance_sT)
+                self._sTmax = sT_max if sT_max > 0 else INISKILL
+                self._sTmin = sT_min if sT_min < float('inf') else INISKILL
+            else:
+                self._sTavg = INISKILL
+                self._sTsd = 0.0
+                self._sTmax = INISKILL
+                self._sTmin = INISKILL
+            
+            if flagWorkerLBU == 1 or flagWorkerLBU == 3:
+                self._sVavg = sum_sV / count
+                variance_sV = max((sum_sV_sq / count) - (self._sVavg ** 2), 0)
+                self._sVsd = math.sqrt(variance_sV)
+            else:
+                self._sVavg = INISKILL
+                self._sVsd = 0.0
+        
+        return self._sAvg, self._sTavg, self._sVavg
+    
+    def compute_bounded_unemployment_change(self, mLim: float, mPer: int) -> float:
+        """
+        Compute bounded rate of change in unemployment (dUeB equation)
+        
+        Uses moving average to smooth and bound the change
+        
+        Args:
+            mLim: Limit for growth rate
+            mPer: Number of periods for moving average
+        
+        Returns:
+            Bounded unemployment rate change
+        """
+        # Get recent unemployment rates
+        Ue_current = self._Ue
+        Ue_values = [Ue_current]
+        
+        for lag in range(1, min(mPer, self._t) + 1):
+            Ue_lag = self.read('_Ue', lag=lag, default=Ue_current)
+            Ue_values.append(Ue_lag)
+        
+        if len(Ue_values) < 2:
+            self._dUeB = 0.0
+            return 0.0
+        
+        # Compute moving average of rate of change
+        changes = []
+        for i in range(len(Ue_values) - 1):
+            if Ue_values[i+1] > 0:
+                change = (Ue_values[i] - Ue_values[i+1]) / Ue_values[i+1]
+                # Bound individual changes
+                change = max(min(change, mLim), -mLim)
+                changes.append(change)
+        
+        if changes:
+            self._dUeB = sum(changes) / len(changes)
+        else:
+            self._dUeB = 0.0
+        
+        return self._dUeB
 
 
 # Hook index for firm reference (placeholder)
