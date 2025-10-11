@@ -385,19 +385,23 @@ class Country(Agent):
         Follows the equation sequencing from fun_KS.cpp::timeStep
         
         Exact sequence:
-        1. Central bank updates interest rates (r, rDeb, rBonds)
-        2. Consumption sector plans (D2e, Q2, L2d, Id)
-        3. Capital sector plans (D1, Q1, L1d)
-        4. Labor market matching (appl, JO1, JO2, L)
-        5. Production and pricing (Q1e, Q2e, p1avg, p2avg)
-        6. Consumption and sales (G, D2d, D2, N, Sav)
-        7. Financial operations (Pi1, Pi2, PiB, Tax1, Tax2, TaxB, NW1, NW2)
-        8. Government operations (Tax, Def, Deb)
-        9. Aggregates (GDPreal, GDPnom)
-        10. Entry/exit (entryExit)
+        1. Regime change (if scheduled)
+        2. Central bank updates interest rates (r, rDeb, rBonds)
+        3. Consumption sector plans (D2e, Q2, L2d, Id)
+        4. Capital sector plans (D1, Q1, L1d)
+        5. Labor market matching (appl, JO1, JO2, L)
+        6. Production and pricing (Q1e, Q2e, p1avg, p2avg)
+        7. Consumption and sales (G, D2d, D2, N, Sav)
+        8. Financial operations (Pi1, Pi2, PiB, Tax1, Tax2, TaxB, NW1, NW2)
+        9. Government operations (Tax, Def, Deb)
+        10. Aggregates (GDPreal, GDPnom)
+        11. Entry/exit (entryExit)
         """
         # Increment time
         self._t += 1
+        
+        # 0. Check for regime change
+        self._check_regime_change()
         
         # 1. Central bank updates interest rates
         self._update_interest_rates()
@@ -434,6 +438,85 @@ class Country(Agent):
         
         # Update lag values for next period
         self.update_lags()
+    
+    def _check_regime_change(self):
+        """
+        Check and apply regime change (regChg equation)
+        Produces a labor market regime change at the time step defined in TregChg
+        """
+        if self._TregChg <= 0 or self._TregChg == 9999:
+            return  # No regime change
+        
+        if self._t != self._TregChg:
+            return  # Not time for regime change yet
+        
+        # Apply regime change parameters
+        # Change flags and parameters to post-change values
+        
+        # Global parameters
+        if hasattr(self, '_flagSearchModeChg'):
+            self._flagSearchMode = self._flagSearchModeChg
+        
+        if hasattr(self, '_flagIndexMinWageChg'):
+            self._flagIndexMinWage = self._flagIndexMinWageChg
+        
+        if hasattr(self, '_flagHireSeqChg'):
+            self._flagHireSeq = self._flagHireSeqChg
+        
+        if hasattr(self, '_flagHireOrder1Chg'):
+            self._flagHireOrder1 = self._flagHireOrder1Chg
+        
+        if hasattr(self, '_flagFireOrder1Chg'):
+            self._flagFireOrder1 = self._flagFireOrder1Chg
+        
+        if hasattr(self, '_trChg'):
+            self._tr = self._trChg
+        
+        # Financial sector parameters
+        fin = self.financial_sector
+        if hasattr(fin, '_LambdaChg'):
+            fin._Lambda = fin._LambdaChg
+        
+        if hasattr(fin, '_muResChg'):
+            fin._muRes = fin._muResChg
+        
+        if hasattr(fin, '_tauBchg'):
+            fin._tauB = fin._tauBchg
+        
+        if hasattr(fin, '_rTchg'):
+            fin._rT = fin._rTchg
+        
+        # Labor market parameters
+        labor = self.labor_market
+        if hasattr(labor, '_TsChg'):
+            labor._Ts = labor._TsChg
+        
+        if hasattr(labor, '_phiChg'):
+            labor._phi = labor._phiChg
+        
+        if hasattr(labor, '_omegaPosChg'):
+            labor._omega = labor._omegaPosChg
+        
+        # Consumption sector parameters
+        con_sector = self.consumption_sector
+        if hasattr(con_sector, '_e0Chg'):
+            con_sector._e0 = con_sector._e0Chg
+        
+        if hasattr(con_sector, '_mu20Chg'):
+            con_sector._mu20 = con_sector._mu20Chg
+        
+        # Firm-specific parameters (apply to all firms)
+        if hasattr(con_sector, '_flagHireOrder2Chg'):
+            for firm in con_sector.firms:
+                firm._flagHireOrder2 = con_sector._flagHireOrder2Chg
+        
+        if hasattr(con_sector, '_flagFireOrder2Chg'):
+            for firm in con_sector.firms:
+                firm._flagFireOrder2 = con_sector._flagFireOrder2Chg
+        
+        if hasattr(con_sector, '_flagFireRuleChg'):
+            for firm in con_sector.firms:
+                firm._flagFireRule = con_sector._flagFireRuleChg
     
     def _update_interest_rates(self):
         """
@@ -753,7 +836,10 @@ class Country(Agent):
         self._Cd = max(Cd, 0)
     
     def _financial_operations(self):
-        """Financial operations: profits, taxes, dividends"""
+        """
+        Financial operations: profits, taxes, dividends
+        Includes aggregate financial statistics
+        """
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         fin_sector = self.financial_sector
@@ -770,10 +856,15 @@ class Country(Agent):
                 if worker._employed > 0:
                     worker._wReal *= wage_growth
         
+        # Total wages paid
+        labor._W = total_wages * labor._Lscale  # Scale up to notional labor force
+        
         # Simplified profit calculation
         cap_sector._Pi1 = cap_sector._Q1e * cap_sector._p1avg * 0.1  # 10% margin
         con_sector._Pi2 = con_sector._S2 * 0.1
-        fin_sector._PiB = 0.0  # Banks TBD
+        
+        # Compute financial sector profits and aggregates
+        self._compute_financial_aggregates()
         
         # Taxes
         cap_sector._Tax1 = max(0, cap_sector._Pi1 * self._tr) if self._flagTax else 0
@@ -793,6 +884,127 @@ class Country(Agent):
         # Net worth updates (simplified)
         cap_sector._NW1 = sum(f._NW1 for f in cap_sector.firms)
         con_sector._NW2 = sum(f._NW2 for f in con_sector.firms)
+    
+    def _compute_financial_aggregates(self):
+        """
+        Compute financial sector aggregate variables
+        Implements BadDeb, BadDeb1, BadDeb2, Depo, Loans, NWb, PiB, DivB, 
+        Gbail, Cl, ExRes, BondsB, BondsCB equations
+        """
+        fin = self.financial_sector
+        cap_sector = self.capital_sector
+        con_sector = self.consumption_sector
+        
+        # BadDeb1 equation - bad debt from capital sector
+        BadDeb1 = 0.0
+        for firm in cap_sector.firms:
+            if hasattr(firm, '_BadDeb1'):
+                BadDeb1 += firm._BadDeb1
+        
+        # BadDeb2 equation - bad debt from consumption sector  
+        BadDeb2 = 0.0
+        for firm in con_sector.firms:
+            if hasattr(firm, '_BadDeb2'):
+                BadDeb2 += firm._BadDeb2
+        
+        # BadDeb equation - total bad debt
+        fin._BadDeb1 = BadDeb1
+        fin._BadDeb2 = BadDeb2
+        fin._BadDeb = BadDeb1 + BadDeb2
+        
+        # Depo equation - total deposits
+        Depo = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_Depo'):
+                Depo += bank._Depo
+        fin._Depo = Depo
+        
+        # Loans equation - total loans
+        Loans = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_Loans'):
+                Loans += bank._Loans
+        fin._Loans = Loans
+        
+        # NWb equation - total bank net worth
+        NWb = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_NWb'):
+                NWb += bank._NWb
+        fin._NWb = NWb
+        
+        # Cl equation - total clients
+        Cl = 0
+        for bank in fin.banks:
+            if hasattr(bank, '_Cl'):
+                Cl += bank._Cl
+        fin._Cl = Cl
+        
+        # ExRes equation - excess reserves
+        ExRes = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_ExRes'):
+                ExRes += bank._ExRes
+        fin._ExRes = ExRes
+        
+        # BondsB equation - bonds held by banks
+        BondsB = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_BondsB'):
+                BondsB += bank._BondsB
+        fin._BondsB = BondsB
+        
+        # PiB equation - total bank profits
+        PiB = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_PiB'):
+                PiB += bank._PiB
+        fin._PiB = PiB
+        
+        # Gbail equation - government bailouts
+        Gbail = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_Gbail'):
+                Gbail += bank._Gbail
+        fin._Gbail = Gbail
+        
+        # BS equation - bond supply
+        # Sovereign bond supply (new issues) from government
+        Def = self._Def
+        DepoG_lag = self.read_sector('_DepoG', fin, lag=1, default=0)
+        BondsB_lag = self.read_sector('_BondsB', fin, lag=1, default=0)
+        BondsCB_lag = self.read_sector('_BondsCB', fin, lag=1, default=0)
+        thetaBonds = getattr(fin, '_thetaBonds', 10.0)
+        
+        bonds_maturing = (BondsB_lag + BondsCB_lag) / thetaBonds
+        
+        if Def + bonds_maturing < DepoG_lag:
+            # No new bonds to supply
+            fin._BS = 0
+            fin._DepoG = DepoG_lag - Def - bonds_maturing
+        else:
+            # Issue just what is needed
+            fin._BS = Def + bonds_maturing - DepoG_lag
+            fin._DepoG = 0
+        
+        # BD equation - bond demand from banks (sum of _BD from banks)
+        BD = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_BD'):
+                BD += bank._BD
+        fin._BD = BD
+        
+        # BondsCB equation - bonds held by central bank (residual)
+        # Central bank absorbs all outstanding bonds issued
+        BondsCB_current = self.read_sector('_BondsCB', fin, lag=0, default=0)
+        fin._BondsCB = max(0, BondsCB_current * (1 - 1/thetaBonds) + fin._BS - fin._BD)
+        
+        # PiCB equation - central bank profits
+        # Interest on bonds held + reserves - interest on deposits
+        rBonds = fin._rBonds
+        rRes = fin._rRes
+        PiCB = fin._BondsCB * rBonds - fin._DepoG * rRes
+        fin._PiCB = PiCB
     
     def _government_operations(self):
         """
@@ -1008,10 +1220,209 @@ class Country(Agent):
         self._G = max(G, 0)
     
     def _entry_exit(self):
-        """Handle firm entry and exit"""
-        # Simplified: no entry/exit in this basic version
-        # Will be implemented in enhanced version
-        pass
+        """
+        Handle firm entry and exit (entryExit equation)
+        Implements basic entry/exit dynamics from fun_KS_country.h
+        """
+        # Track entry/exit counts
+        exits = 0
+        entries = 0
+        
+        # Capital sector entry/exit
+        exits += self._capital_sector_exit()
+        entries += self._capital_sector_entry()
+        
+        # Consumption sector entry/exit
+        exits += self._consumption_sector_exit()
+        entries += self._consumption_sector_entry()
+        
+        # Recompute aggregates affected by entry/exit
+        self._compute_entry_exit_costs()
+        
+        # Update financial sector credit scores
+        # (pecking order for credit allocation)
+        self._update_credit_scores()
+        
+        return exits + entries
+    
+    def _capital_sector_exit(self):
+        """Exit process for capital sector firms"""
+        cap_sector = self.capital_sector
+        exits = 0
+        
+        # Identify firms to exit (negative net worth or market share too low)
+        firms_to_exit = []
+        for firm in cap_sector.firms:
+            # Exit if negative net worth
+            if firm._NW1 < 0:
+                firms_to_exit.append(firm)
+        
+        # Remove exiting firms
+        for firm in firms_to_exit:
+            # Fire all workers
+            for worker in self.workers:
+                if worker._employer == firm:
+                    worker._employed = 0
+                    worker._employer = None
+                    worker._Te = 0
+            
+            # Record exit cost/credit
+            if hasattr(firm, '_NW1'):
+                self._cExit += max(0, firm._NW1)  # Positive NW returned
+            
+            # Remove from firm list
+            cap_sector.firms.remove(firm)
+            exits += 1
+        
+        return exits
+    
+    def _capital_sector_entry(self):
+        """Entry process for capital sector firms"""
+        cap_sector = self.capital_sector
+        entries = 0
+        
+        # Check if entry is needed (maintain minimum number)
+        current_firms = len(cap_sector.firms)
+        F1min = int(cap_sector._F1min)
+        F1max = int(cap_sector._F1max)
+        
+        # Entry if below minimum and below maximum
+        if current_firms < F1min and current_firms < F1max:
+            # Create new firm
+            new_id = max([f._ID1 for f in cap_sector.firms], default=0) + 1
+            new_firm = Firm1(firm_id=new_id, parent=cap_sector)
+            
+            # Initialize with average characteristics
+            if cap_sector.firms:
+                avg_A = sum(f._Atau for f in cap_sector.firms) / len(cap_sector.firms)
+                avg_B = sum(f._Btau for f in cap_sector.firms) / len(cap_sector.firms)
+                new_firm._Atau = avg_A
+                new_firm._Btau = avg_B
+            else:
+                new_firm._Atau = INIPROD
+                new_firm._Btau = INIPROD
+            
+            # Initial values
+            new_firm._p1 = new_firm._Btau * (1 + cap_sector._mu1)
+            new_firm._NW1 = 10.0  # Initial equity
+            
+            # Record entry cost
+            self._cEntry += new_firm._NW1
+            
+            cap_sector.firms.append(new_firm)
+            entries += 1
+        
+        return entries
+    
+    def _consumption_sector_exit(self):
+        """Exit process for consumption sector firms"""
+        con_sector = self.consumption_sector
+        exits = 0
+        
+        # Identify firms to exit
+        firms_to_exit = []
+        for firm in con_sector.firms:
+            # Exit if negative net worth
+            if firm._NW2 < 0:
+                firms_to_exit.append(firm)
+        
+        # Remove exiting firms
+        for firm in firms_to_exit:
+            # Fire all workers
+            for worker in self.workers:
+                if worker._employer == firm:
+                    worker._employed = 0
+                    worker._employer = None
+                    worker._Te = 0
+            
+            # Record exit cost/credit
+            if hasattr(firm, '_NW2'):
+                self._cExit += max(0, firm._NW2)
+            
+            # Remove from firm list
+            con_sector.firms.remove(firm)
+            exits += 1
+        
+        return exits
+    
+    def _consumption_sector_entry(self):
+        """Entry process for consumption sector firms"""
+        con_sector = self.consumption_sector
+        entries = 0
+        
+        # Check if entry is needed
+        current_firms = len(con_sector.firms)
+        F2min = int(con_sector._F2min)
+        F2max = int(con_sector._F2max)
+        
+        # Entry if below minimum and below maximum
+        if current_firms < F2min and current_firms < F2max:
+            # Create new firm
+            new_id = max([f._ID2 for f in con_sector.firms], default=0) + 1
+            new_firm = Firm2(firm_id=new_id, parent=con_sector)
+            
+            # Initialize with average characteristics
+            if con_sector.firms:
+                avg_A = sum(f._A2 for f in con_sector.firms) / len(con_sector.firms)
+                new_firm._A2 = avg_A
+            else:
+                new_firm._A2 = INIPROD
+            
+            # Initial values
+            new_firm._mu2 = con_sector._mu20
+            new_firm._p2 = new_firm._A2 * (1 + new_firm._mu2)
+            new_firm._NW2 = 10.0  # Initial equity
+            
+            # Record entry cost
+            self._cEntry += new_firm._NW2
+            
+            con_sector.firms.append(new_firm)
+            entries += 1
+        
+        return entries
+    
+    def _compute_entry_exit_costs(self):
+        """
+        Compute entry/exit costs and equity changes
+        Implements cEntry, cExit, Eq equations
+        """
+        # cEntry and cExit are accumulated during entry/exit process
+        # (already done in entry/exit methods above)
+        
+        # Recompute total equity (Eq equation)
+        cap_sector = self.capital_sector
+        con_sector = self.consumption_sector
+        fin_sector = self.financial_sector
+        
+        cap_equity = sum(getattr(f, '_NW1', 0) for f in cap_sector.firms)
+        con_equity = sum(getattr(f, '_NW2', 0) for f in con_sector.firms)
+        bank_equity = sum(getattr(b, '_NWb', 0) for b in fin_sector.banks)
+        
+        self._Eq = cap_equity + con_equity + bank_equity
+    
+    def _update_credit_scores(self):
+        """
+        Update credit scores and pecking order
+        Sets the credit allocation pecking order for firms
+        """
+        # This will be used by banks for credit allocation
+        # For now, just store firm rankings by net worth to sales ratio
+        cap_sector = self.capital_sector
+        con_sector = self.consumption_sector
+        
+        # Rank capital sector firms
+        for firm in cap_sector.firms:
+            if hasattr(firm, '_S1') and firm._S1 > 0:
+                firm._credit_score = safe_divide(firm._NW1, firm._S1)
+            else:
+                firm._credit_score = 0.0
+        
+        # Rank consumption sector firms
+        for firm in con_sector.firms:
+            if hasattr(firm, '_S2') and firm._S2 > 0:
+                firm._credit_score = safe_divide(firm._NW2, firm._S2)
+            else:
+                firm._credit_score = 0.0
     
     def simulate(self, periods: int) -> Dict:
         """
