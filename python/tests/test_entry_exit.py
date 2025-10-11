@@ -4,6 +4,12 @@ Test Entry/Exit Support Functions
 Validates the detailed entry/exit implementations match expected behavior.
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from model import Country, entry_firm1, entry_firm2, exit_firm
 from model.random_engine import random_engine
 

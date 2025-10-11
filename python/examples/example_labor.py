@@ -3,6 +3,12 @@ Example: Labor Market Matching
 Demonstrates worker-firm matching in labor market
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from model.labor import LaborMarket, create_application
 from model.worker import Worker
 from model.firm1 import Firm1

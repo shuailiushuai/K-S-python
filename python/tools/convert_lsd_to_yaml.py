@@ -4,6 +4,10 @@ Convert LSD configuration files to YAML format
 This script parses all .lsd files and converts them to clean YAML configurations
 """
 
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import sys
 import yaml
 from pathlib import Path

@@ -7,6 +7,11 @@ matching the C++ implementation in fun_KS_test.h
 Based on Nikiforos & Zezza 2017 approach
 """
 
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import sys
 from model.country import Country
 from config import get_default_config

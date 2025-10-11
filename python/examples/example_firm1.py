@@ -3,6 +3,12 @@ Example: Firm1 R&D and Innovation
 Demonstrates the capital goods firm innovation/imitation process
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from model.firm1 import Firm1
 from model.agent import Agent
 from model.random_engine import random_engine

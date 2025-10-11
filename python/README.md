@@ -10,10 +10,13 @@ pip install numpy pyyaml
 python run_simulation.py --config configs/baseline.yaml --periods 100
 
 # Run integration tests
-python test_integration.py
+python tests/test_integration.py
+
+# Try examples
+python examples/example_simulation.py
 ```
 
-See [SIMULATION_GUIDE.md](SIMULATION_GUIDE.md) for detailed instructions.
+See [docs/SIMULATION_GUIDE.md](docs/SIMULATION_GUIDE.md) for detailed instructions.
 
 ## Overview
 
@@ -21,7 +24,7 @@ This directory contains a Python reimplementation of the Labor- and Finance-Augm
 
 The original model was implemented in C++ for the LSD (Laboratory for Simulation Development) environment and contains approximately 10,800 lines of code across multiple modules.
 
-**Status: 70% complete with working end-to-end simulation** ✅
+**Status: 86.5% complete with working end-to-end simulation** ✅
 
 ## Implementation Approach
 
@@ -43,27 +46,43 @@ After careful analysis of the original K+S model, **pure Python** was chosen ove
 
 ```
 python/
-├── configs/                    # Configuration files (YAML)
-│   └── baseline.yaml           # ✅ Baseline scenario configuration
 ├── model/                      # Core model implementation
-│   ├── __init__.py
-│   ├── agent.py                # ✅ Base agent class
-│   ├── constants.py            # ✅ Model constants
-│   ├── data_structures.py      # ✅ Data structures (Vintage, Application, etc.)
-│   ├── random_engine.py        # ✅ Random number generation (mt19937_64)
-│   ├── support.py              # ✅ Utility functions
-│   ├── worker.py               # ✅ Worker agent implementation
-│   ├── firm1.py                # ✅ Capital goods firm
-│   ├── firm2.py                # ✅ Consumption goods firm
-│   ├── bank.py                 # ✅ Bank agent
-│   ├── vintage.py              # ✅ Machine vintage
-│   ├── country.py              # ✅ Country/economy orchestrator
-│   └── labor.py                # ✅ Labor market
-├── config.py                   # ✅ Configuration loader
-├── run_simulation.py           # ✅ Simulation runner (CLI)
-├── example_*.py                # ✅ Individual agent examples
-├── test_integration.py         # ✅ Integration test suite
-└── *.md                        # ✅ Documentation
+│   ├── agents/                 # Agent implementations
+│   │   ├── worker.py           # Worker agents
+│   │   ├── firm1.py            # Capital goods firms
+│   │   ├── firm2.py            # Consumption goods firms
+│   │   ├── bank.py             # Banks
+│   │   └── vintage.py          # Machine vintages
+│   ├── country.py              # Country/economy orchestrator
+│   ├── labor.py                # Labor market
+│   ├── statistics.py           # Statistics collection
+│   ├── entry_exit.py           # Entry/exit dynamics
+│   └── utils/                  # Utility modules
+│       ├── constants.py        # Model constants
+│       ├── data_structures.py  # Data structures
+│       ├── random_engine.py    # Random number generation
+│       └── support.py          # Support functions
+├── configs/                    # Configuration files (YAML)
+│   ├── baseline.yaml           # Baseline configuration
+│   └── ...                     # Scenario configurations
+├── examples/                   # Example usage scripts
+│   ├── example_simulation.py   # Basic simulation
+│   ├── example_scenarios.py    # Multiple scenarios
+│   └── ...                     # Individual agent examples
+├── tests/                      # Test suite
+│   ├── test_integration.py     # Integration tests
+│   ├── test_validation.py      # Validation tests
+│   └── ...                     # Other test files
+├── tools/                      # Utility tools
+│   ├── convert_configs.py      # LSD to YAML converter
+│   └── verify.py               # Completeness verifier
+├── docs/                       # Documentation
+│   ├── SIMULATION_GUIDE.md     # Simulation guide
+│   ├── QUICKSTART.md           # Quick start guide
+│   └── ...                     # Other documentation
+├── config.py                   # Configuration loader
+├── run_simulation.py           # Main CLI entry point
+└── requirements.txt            # Dependencies
 ```
 
 ## Model Architecture

@@ -3,6 +3,12 @@ Example: Firm2 Agent Basic Operations
 Demonstrates consumption goods firm functionality
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from model.firm2 import Firm2
 from model.firm1 import Firm1
 from model.vintage import VintageAgent
