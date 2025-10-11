@@ -1308,6 +1308,9 @@ class Country(Agent):
         cap_sector.compute_MC1()
         con_sector.compute_MC2()
         
+        # Compute labor market aggregations (sAvg, wAvg, etc.)
+        self._compute_labor_aggregates()
+        
         # Real consumption (Creal equation)
         # Actual consumption in quantity terms using base price
         pC0 = con_sector._pC0  # Base price level
@@ -1382,15 +1385,35 @@ class Country(Agent):
         self._DebGDP = safe_divide(self._Deb, self._GDPnom)
         self._DefPgdp = safe_divide(self._DefP, self._GDPnom)
         
-        # Total dividends (Div equation)
-        self._Div = cap_sector._Div1 + con_sector._Div2 + self.financial_sector._DivB
+    def _compute_labor_aggregates(self):
+        """
+        Compute labor market aggregate statistics
+        Implements sAvg, wAvg, wMinPol, sTmax, etc.
+        """
+        labor = self.labor_market
         
-        # Total equity (Eq equation)
-        # Sum of firm equities minus bad debt
-        cap_equity = sum(getattr(f, '_NW1', 0) for f in cap_sector.firms)
-        con_equity = sum(getattr(f, '_NW2', 0) for f in con_sector.firms)
-        bank_equity = sum(getattr(b, '_NWb', 0) for b in self.financial_sector.banks)
-        self._Eq = cap_equity + con_equity + bank_equity
+        # Compute wage aggregates (wAvg equation)
+        wAvg, wMinPol, wU = labor.compute_wage_aggregates(self.workers)
+        labor._wAvg = wAvg
+        labor.write("wAvg", wAvg)
+        
+        # Compute skills aggregates (sAvg, sTavg, sVavg equations)
+        sAvg, sTavg, sVavg = labor.compute_skills_aggregates(self.workers)
+        labor._sAvg = sAvg
+        labor._sTavg = sTavg
+        labor._sVavg = sVavg
+        
+        labor.write("sAvg", sAvg)
+        labor.write("sTavg", sTavg)
+        labor.write("sVavg", sVavg)
+        labor.write("sTmin", labor._sTmin)
+        labor.write("sTmax", labor._sTmax)
+        labor.write("sTsd", labor._sTsd)
+        labor.write("sVsd", labor._sVsd)
+        
+        # Compute policy minimum wage (wMinPol equation)
+        # Already computed by compute_wage_aggregates above
+        labor.write("wMinPol", wMinPol)
     
     def _compute_government_expenditure(self):
         """

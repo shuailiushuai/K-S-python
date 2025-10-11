@@ -9,6 +9,7 @@ from .worker import Worker
 from .data_structures import Application, WageOffer
 from .support import safe_divide
 from .random_engine import random_engine
+from .constants import INISKILL, INIPROD
 import math
 
 
