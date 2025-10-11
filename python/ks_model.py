@@ -748,6 +748,24 @@ class KSModel:
                     entry_time=t
                 )
                 firm.machine_productivity = machine_prod
+                
+                # Initialize entrant pricing and costs (critical fix!)
+                # Entrants should have similar productivity and pricing to incumbents
+                if self.firms1:
+                    # Use average labor productivity from incumbents
+                    avg_btau = sum(f.labor_productivity_output for f in self.firms1) / len(self.firms1)
+                    firm.labor_productivity_output = avg_btau * (0.8 + 0.4 * np.random.random())
+                else:
+                    firm.labor_productivity_output = self.params.get('Btau0', 0.052)
+                
+                # Calculate proper cost and price following C++ model
+                w1avg_prev = self.params.get('w1avg_prev', self.params.get('w0min', 1.0))
+                m1 = self.params.get('m1', 1.0)
+                mu1 = self.params.get('mu1', 0.04)
+                
+                firm.unit_cost = w1avg_prev / (firm.labor_productivity_output * m1)
+                firm.price = (1 + mu1) * firm.unit_cost
+                
                 self.firms1.append(firm)
                 self.entry_firms1 += 1
         
