@@ -206,6 +206,7 @@ class Country(Agent):
         self._dGDP = 0.0                  # GDP growth rate
         self._DebGDP = 0.0                # Debt to GDP ratio
         self._DefPgdp = 0.0               # Primary deficit to GDP ratio
+        self._inflation = 0.0             # Inflation rate
         
         # Create sectors
         self.capital_sector = CapitalSector(self)
@@ -470,6 +471,16 @@ class Country(Agent):
         sector._Q1 = 0.0
         sector._L1d = 0
         
+        # Firms do R&D (simplified innovation)
+        for firm in sector.firms:
+            # Simple R&D: small chance of productivity improvement each period
+            if random_engine.uniform() < 0.1:  # 10% chance per period
+                improvement = 1.0 + random_engine.uniform() * 0.05  # 0-5% improvement
+                firm._Atau *= improvement
+                firm._Btau *= improvement
+                # Update price based on new productivity (lower cost)
+                firm._p1 = firm._Btau * (1 + sector._mu1)
+        
         # Machine demand from consumption sector (simplified for now)
         sector._D1 = max(self.consumption_sector._Id, len(self.consumption_sector.firms) * 0.1)
         
@@ -552,6 +563,17 @@ class Country(Agent):
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         
+        # Update worker skills based on employment
+        for worker in self.workers:
+            if worker._employed > 0:
+                # Worker is employed - skills improve with tenure
+                worker._Te += 1
+                # Simple learning: skills improve slightly each period employed
+                worker._sT = min(worker._sT * 1.01, 2.0)  # Cap at 2x initial
+            else:
+                # Unemployed - skills deteriorate
+                worker._sT = max(worker._sT * 0.99, 0.5)  # Floor at 0.5x initial
+        
         # Capital sector production based on actual employment
         cap_sector._Q1e = 0.0
         for firm in cap_sector.firms:
@@ -610,6 +632,18 @@ class Country(Agent):
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         fin_sector = self.financial_sector
+        labor = self.labor_market
+        
+        # Update average wage based on actual wages
+        total_wages = sum(w._wReal for w in self.workers if w._employed > 0)
+        employed = sum(1 for w in self.workers if w._employed > 0)
+        if employed > 0:
+            labor._wAvg = total_wages / employed
+            # Wage growth: small inflation + productivity gains
+            wage_growth = 1.0 + 0.01  # 1% baseline growth
+            for worker in self.workers:
+                if worker._employed > 0:
+                    worker._wReal *= wage_growth
         
         # Simplified profit calculation
         cap_sector._Pi1 = cap_sector._Q1e * cap_sector._p1avg * 0.1  # 10% margin
@@ -668,9 +702,19 @@ class Country(Agent):
             if gdp_prev and gdp_prev > 0:
                 self._dGDP = math.log(self._GDPreal) - math.log(gdp_prev)
         
+        # Inflation (price level change)
+        prev_price = self.read('_p2avg', lag=1) if self._t > 1 else con_sector._p2avg
+        if prev_price and prev_price > 0:
+            self._inflation = (con_sector._p2avg - prev_price) / prev_price
+        else:
+            self._inflation = 0.0
+        
         # Debt ratios
         self._DebGDP = safe_divide(self._Deb, self._GDPnom)
         self._DefPgdp = safe_divide(self._DefP, self._GDPnom)
+        
+        # Store price level for next period
+        self.write('_p2avg', con_sector._p2avg)
     
     def _compute_government_expenditure(self):
         """Compute government expenditure"""
@@ -736,7 +780,7 @@ class Country(Agent):
             results['GDPreal'].append(self._GDPreal)
             results['GDPnom'].append(self._GDPnom)
             results['Unemployment'].append(self.labor_market._Ue)
-            results['Inflation'].append(0.0)  # TBD
+            results['Inflation'].append(self._inflation)
             results['Debt'].append(self._Deb)
             results['Deficit'].append(self._Def)
         
