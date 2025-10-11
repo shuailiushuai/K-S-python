@@ -96,54 +96,110 @@ class Firm2(Agent):
     
     def compute_demand_expectation(self, mode: int, params: dict) -> float:
         """
-        Compute demand expectation for next period
+        Compute demand expectation for next period (_D2e equation)
         
-        Multiple expectation modes:
-        0: Myopic (past sales)
-        1: Accelerating (past + growth trend)
-        2: Adaptive (weighted past sales)
-        3: Extrapolative (linear extrapolation)
-        4: Hybrid (combines multiple modes)
+        Exactly matches fun_KS_firm2.h _D2e equation logic
+        
+        Multiple expectation modes (flagExpect):
+        0: Myopic with 1-period memory
+        1: Myopic with up to 4-period memory
+        2: Accelerating GD expectations
+        3: 1st order adaptive expectations
+        4: Extrapolative-accelerating expectations
         
         Args:
             mode: Expectation formation mode (0-4)
-            params: Dictionary with:
-                - e: Demand expectation memory parameter
-                - rho: Smoothing parameter
-                - Various mode-specific parameters
+            params: Dictionary with expectation parameters:
+                - e0: Animal spirits parameter
+                - e1, e2, e3, e4: Weights for mode 1
+                - e5: Acceleration parameter for mode 2
+                - e6: Adaptation parameter for mode 3
+                - e7, e8: Parameters for mode 4
+                - iota: Desired inventory adjustment
         
         Returns:
             Expected demand
         """
-        e = params.get('e', 4)
+        # Entrant firms use myopic-optimistic expectations
+        if self._life2cycle < 3:
+            D2d_lag1 = self.read("_D2d", 1)
+            D2e_current = self.read("_D2e")
+            D2e = max(D2d_lag1, D2e_current)
+            self.write("_D2e", D2e)
+            self._D2e = D2e
+            return D2e
         
+        # Get parameters
+        e0 = params.get('e0', 0.0)  # Animal spirits parameter
+        
+        # Determine number of required data periods
+        if mode == 0 or mode > 4:
+            j = 1
+        elif mode == 1:
+            j = 4
+        else:
+            j = 2
+        
+        # Compute mix between fulfilled and potential demand (orders)
+        v = {}
+        for i in range(1, j + 1):
+            D2_lag = self.read("_D2", i)  # Fulfilled demand
+            D2d_lag = self.read("_D2d", i)  # Desired demand
+            v[i] = max((1 - e0) * D2_lag + e0 * D2d_lag, D2_lag)
+        
+        # Apply expectation mode
         if mode == 0:
-            # Myopic: simply past sales
-            D2e = self.read("_S2", 1)
+            # Myopic expectations with 1-period memory
+            D2e = v[1]
             
         elif mode == 1:
-            # Accelerating: past sales + growth trend
-            S2_lag1 = self.read("_S2", 1)
-            S2_lag2 = self.read("_S2", 2)
-            growth = S2_lag1 - S2_lag2 if S2_lag2 > 0 else 0
-            D2e = S2_lag1 + growth
+            # Myopic expectations with up to 4-period memory
+            e1 = params.get('e1', 1.0)
+            e2 = params.get('e2', 0.0)
+            e3 = params.get('e3', 0.0)
+            e4 = params.get('e4', 0.0)
+            
+            v_sum = 0.0
+            w_sum = 0.0
+            weights = [e1, e2, e3, e4]
+            
+            for i in range(1, 5):
+                if v.get(i, 0) > 0:  # Consider only periods with demand
+                    v_sum += weights[i-1] * v[i]
+                    w_sum += weights[i-1]
+            
+            D2e = v_sum / w_sum if w_sum > 0 else 0
             
         elif mode == 2:
-            # Adaptive: exponentially weighted moving average
-            rho = params.get('rho', 0.9)
-            S2_lag1 = self.read("_S2", 1)
-            D2_lag1 = self.read("_D2e", 1)
-            D2e = rho * D2_lag1 + (1 - rho) * S2_lag1
+            # Accelerating GD expectations
+            e5 = params.get('e5', 0.1)
+            v1 = v.get(1, 0)
+            v2 = max(v.get(2, 1), 1)  # Floor to positive only
+            D2e = (1 + e5 * (v1 - v2) / v2) * v1
             
         elif mode == 3:
-            # Extrapolative: linear extrapolation from past sales
-            sales_sum = sum(self.read("_S2", lag) for lag in range(1, e + 1))
-            D2e = sales_sum / e if e > 0 else self.read("_S2", 1)
+            # 1st order adaptive expectations
+            e6 = params.get('e6', 0.5)
+            v1 = v.get(1, 0)
+            v2 = v.get(2, 0)
+            D2e_current = self.read("_D2e")
+            D2e = D2e_current + e6 * (v1 - v2)
             
-        else:  # mode == 4 or default
-            # Hybrid: average of past periods
-            sales_sum = sum(self.read("_S2", lag) for lag in range(1, e + 1))
-            D2e = sales_sum / e if e > 0 else self.read("_S2", 1)
+        else:  # mode == 4
+            # Extrapolative-accelerating expectations
+            e7 = params.get('e7', 0.1)
+            e8 = params.get('e8', 0.5)
+            v1 = v.get(1, 0)
+            v2 = max(v.get(2, 1), 1)  # Floor to positive only
+            
+            # Need dGDP from grandparent (Country)
+            try:
+                grandparent = self.parent.parent  # Country
+                dGDP_lag1 = grandparent.read("dGDP", 1)
+            except:
+                dGDP_lag1 = 0.0
+            
+            D2e = (1 + e7 * (v1 - v2) / v2 + e8 * dGDP_lag1) * v1
         
         D2e = max(0, D2e)  # Cannot be negative
         
@@ -262,6 +318,46 @@ class Firm2(Agent):
         self._SI = SI
         
         return EI, SI, EI + SI
+    
+    def compute_markup(self, upsilon: float, f2min: float) -> float:
+        """
+        Compute firm's mark-up (_mu2 equation)
+        
+        Exactly matches fun_KS_firm2.h _mu2 equation (lines 546-558)
+        
+        Mark-up adjusts based on market share changes:
+        - Increasing market share → increase mark-up
+        - Decreasing market share → decrease mark-up
+        - Just-entered firms keep initial mark-up
+        
+        Args:
+            upsilon: Mark-up adjustment parameter
+            f2min: Minimum market share threshold
+        
+        Returns:
+            Updated mark-up
+        """
+        # Get past market shares
+        f2_lag1 = self.read("_f2", 1)
+        f2_lag2 = self.read("_f2", 2)
+        mu2_current = self.read("_mu2")
+        
+        # Just entered firms keep initial mark-up
+        if f2_lag1 < f2min or f2_lag2 < f2min:
+            mu2 = mu2_current
+        else:
+            # Adjust based on market share trend
+            if f2_lag2 > 0:
+                mu2 = mu2_current * (1 + upsilon * (f2_lag1 / f2_lag2 - 1))
+            else:
+                mu2 = mu2_current
+        
+        # Ensure non-negative
+        mu2 = max(0, mu2)
+        
+        self.write("_mu2", mu2)
+        self._mu2 = mu2
+        return mu2
     
     def compute_labor_demand(self, m2: float) -> int:
         """
