@@ -385,19 +385,23 @@ class Country(Agent):
         Follows the equation sequencing from fun_KS.cpp::timeStep
         
         Exact sequence:
-        1. Central bank updates interest rates (r, rDeb, rBonds)
-        2. Consumption sector plans (D2e, Q2, L2d, Id)
-        3. Capital sector plans (D1, Q1, L1d)
-        4. Labor market matching (appl, JO1, JO2, L)
-        5. Production and pricing (Q1e, Q2e, p1avg, p2avg)
-        6. Consumption and sales (G, D2d, D2, N, Sav)
-        7. Financial operations (Pi1, Pi2, PiB, Tax1, Tax2, TaxB, NW1, NW2)
-        8. Government operations (Tax, Def, Deb)
-        9. Aggregates (GDPreal, GDPnom)
-        10. Entry/exit (entryExit)
+        1. Regime change (if scheduled)
+        2. Central bank updates interest rates (r, rDeb, rBonds)
+        3. Consumption sector plans (D2e, Q2, L2d, Id)
+        4. Capital sector plans (D1, Q1, L1d)
+        5. Labor market matching (appl, JO1, JO2, L)
+        6. Production and pricing (Q1e, Q2e, p1avg, p2avg)
+        7. Consumption and sales (G, D2d, D2, N, Sav)
+        8. Financial operations (Pi1, Pi2, PiB, Tax1, Tax2, TaxB, NW1, NW2)
+        9. Government operations (Tax, Def, Deb)
+        10. Aggregates (GDPreal, GDPnom)
+        11. Entry/exit (entryExit)
         """
         # Increment time
         self._t += 1
+        
+        # 0. Check for regime change
+        self._check_regime_change()
         
         # 1. Central bank updates interest rates
         self._update_interest_rates()
@@ -435,16 +439,156 @@ class Country(Agent):
         # Update lag values for next period
         self.update_lags()
     
-    def _update_interest_rates(self):
-        """Update interest rate structure"""
-        fin = self.financial_sector
+    def _check_regime_change(self):
+        """
+        Check and apply regime change (regChg equation)
+        Produces a labor market regime change at the time step defined in TregChg
+        """
+        if self._TregChg <= 0 or self._TregChg == 9999:
+            return  # No regime change
         
-        # Simple fixed rate for now (can be enhanced with Taylor rule)
-        fin._r = fin._rT
-        fin._rBonds = fin._r * (1 + fin._muBonds)
-        fin._rD = fin._r * (1 + fin._muD)
-        fin._rDeb = fin._r * (1 + fin._muDeb)
-        fin._rRes = fin._r * (1 + fin._muRes)
+        if self._t != self._TregChg:
+            return  # Not time for regime change yet
+        
+        # Apply regime change parameters
+        # Change flags and parameters to post-change values
+        
+        # Global parameters
+        if hasattr(self, '_flagSearchModeChg'):
+            self._flagSearchMode = self._flagSearchModeChg
+        
+        if hasattr(self, '_flagIndexMinWageChg'):
+            self._flagIndexMinWage = self._flagIndexMinWageChg
+        
+        if hasattr(self, '_flagHireSeqChg'):
+            self._flagHireSeq = self._flagHireSeqChg
+        
+        if hasattr(self, '_flagHireOrder1Chg'):
+            self._flagHireOrder1 = self._flagHireOrder1Chg
+        
+        if hasattr(self, '_flagFireOrder1Chg'):
+            self._flagFireOrder1 = self._flagFireOrder1Chg
+        
+        if hasattr(self, '_trChg'):
+            self._tr = self._trChg
+        
+        # Financial sector parameters
+        fin = self.financial_sector
+        if hasattr(fin, '_LambdaChg'):
+            fin._Lambda = fin._LambdaChg
+        
+        if hasattr(fin, '_muResChg'):
+            fin._muRes = fin._muResChg
+        
+        if hasattr(fin, '_tauBchg'):
+            fin._tauB = fin._tauBchg
+        
+        if hasattr(fin, '_rTchg'):
+            fin._rT = fin._rTchg
+        
+        # Labor market parameters
+        labor = self.labor_market
+        if hasattr(labor, '_TsChg'):
+            labor._Ts = labor._TsChg
+        
+        if hasattr(labor, '_phiChg'):
+            labor._phi = labor._phiChg
+        
+        if hasattr(labor, '_omegaPosChg'):
+            labor._omega = labor._omegaPosChg
+        
+        # Consumption sector parameters
+        con_sector = self.consumption_sector
+        if hasattr(con_sector, '_e0Chg'):
+            con_sector._e0 = con_sector._e0Chg
+        
+        if hasattr(con_sector, '_mu20Chg'):
+            con_sector._mu20 = con_sector._mu20Chg
+        
+        # Firm-specific parameters (apply to all firms)
+        if hasattr(con_sector, '_flagHireOrder2Chg'):
+            for firm in con_sector.firms:
+                firm._flagHireOrder2 = con_sector._flagHireOrder2Chg
+        
+        if hasattr(con_sector, '_flagFireOrder2Chg'):
+            for firm in con_sector.firms:
+                firm._flagFireOrder2 = con_sector._flagFireOrder2Chg
+        
+        if hasattr(con_sector, '_flagFireRuleChg'):
+            for firm in con_sector.firms:
+                firm._flagFireRule = con_sector._flagFireRuleChg
+    
+    def _update_interest_rates(self):
+        """
+        Update interest rate structure
+        Implements r, rBonds, rD, rDeb, rRes equations from fun_KS_financial.h
+        """
+        fin = self.financial_sector
+        con_sector = self.consumption_sector
+        labor = self.labor_market
+        
+        # Central bank prime rate (r equation - Taylor rule)
+        r_current = fin._r
+        rAdj = getattr(fin, '_rAdj', 0.0025)  # Rate adjustment step
+        
+        # Taylor rule
+        piT = getattr(fin, '_piT', 0.02)  # Target inflation
+        Ut = getattr(fin, '_Ut', 0.05)  # Target unemployment
+        gammaPi = getattr(fin, '_gammaPi', 1.5)  # Inflation weight
+        gammaU = getattr(fin, '_gammaU', 0.5)  # Unemployment weight
+        rT = fin._rT  # Target rate
+        
+        # Get inflation and unemployment from previous period
+        dCPIb_lag = self.read('_inflation', lag=1, default=0)  # Bounded inflation
+        Ue_lag = labor._Ue  # Current unemployment rate
+        
+        # Taylor rule formula
+        r_taylor = rT + gammaPi * (dCPIb_lag - piT) + gammaU * (Ut - Ue_lag)
+        
+        # Smooth rate adjustment
+        if abs(r_taylor - r_current) > 2 * rAdj:
+            # Big adjustment
+            fin._r = r_current + (2 * rAdj if r_taylor > r_current else -2 * rAdj)
+        elif abs(r_taylor - r_current) > rAdj:
+            # Small adjustment
+            fin._r = r_current + (rAdj if r_taylor > r_current else -rAdj)
+        else:
+            fin._r = r_taylor
+        
+        fin._r = max(fin._r, 0)  # Non-negative
+        
+        # Bond interest rate (rBonds equation)
+        rBonds_current = getattr(fin, '_rBonds', fin._r)
+        muBonds = fin._muBonds  # Bond rate spread
+        rhoBonds = getattr(fin, '_rhoBonds', 0.0)  # Debt feedback
+        
+        # Base bond rate
+        rBonds_base = (1 - muBonds) * fin._r
+        
+        # Positive feedback on excessive public debt
+        DebGDP = self._DebGDP if hasattr(self, '_DebGDP') else 0
+        if DebGDP > 0:
+            rBonds_base *= (1 + rhoBonds * DebGDP)
+        
+        # Smooth adjustment
+        if abs(rBonds_base - rBonds_current) > 2 * rAdj:
+            fin._rBonds = rBonds_current + (2 * rAdj if rBonds_base > rBonds_current else -2 * rAdj)
+        elif abs(rBonds_base - rBonds_current) > rAdj:
+            fin._rBonds = rBonds_current + (rAdj if rBonds_base > rBonds_current else -rAdj)
+        else:
+            fin._rBonds = rBonds_base
+        
+        fin._rBonds = max(fin._rBonds, 0)
+        
+        # Deposit interest rate (rD equation)
+        fin._rD = (1 - fin._muD) * fin._r
+        
+        # Debt interest rate (rDeb equation)
+        # Lower-bounded by expected inflation
+        fin._rDeb = max((1 + fin._muDeb) * fin._r, piT)
+        
+        # Reserve interest rate (rRes equation)
+        fin._rRes = (1 - fin._muRes) * fin._r
     
     def _consumption_planning(self):
         """Consumption sector planning phase"""
@@ -622,10 +766,8 @@ class Country(Agent):
         # Government expenditure
         self._compute_government_expenditure()
         
-        # Desired consumption from workers (using actual wages)
-        labor = self.labor_market
-        total_wages = sum(w._wReal for w in self.workers if w._employed > 0)
-        self._Cd = total_wages if total_wages > 0 else 0.0
+        # Compute desired consumption (Cd equation from fun_KS_country.h)
+        self._compute_desired_consumption()
         
         # Match with supply
         con_sector = self.consumption_sector
@@ -639,15 +781,65 @@ class Country(Agent):
                 firm_share = firm._Q2e / con_sector._Q2e if con_sector._Q2e > 0 else 0
                 firm._S2 = self._C * firm_share
         
-        # Forced savings
-        self._Sav = max(0, self._Cd - self._C)
+        # Forced savings (Sav equation)
+        self._Sav = max(0, self._Cd + self._G - self._C)
+        
+        # Update accumulated savings (SavAcc equation)
+        # Note: SavAcc is adjusted in Cd equation based on flagCons
         self._SavAcc += self._Sav
         
         # Inventories
         con_sector._N = max(0, supply - self._C)
+        con_sector._dNnom = con_sector._N - self.read_sector('_N', con_sector, lag=1) if self._t > 1 else 0
+    
+    def _compute_desired_consumption(self):
+        """
+        Compute desired consumption (Cd equation from fun_KS_country.h)
+        Nominal (monetary terms) desired aggregated consumption
+        """
+        labor = self.labor_market
+        
+        # Workers' net income after taxes
+        # Wages + unemployment benefits + past bonuses/dividends - taxes
+        W = labor._W if hasattr(labor, '_W') else 0  # Total wages
+        G = self._G  # Unemployment benefits
+        Bon_lag = self.read_sector('_Bon', labor, lag=1) if self._t > 1 else 0
+        TaxW = labor._TaxW if hasattr(labor, '_TaxW') else 0
+        Div_lag = self.read('_Div', lag=1) if self._t > 1 else 0
+        TaxDiv = self._TaxDiv if hasattr(self, '_TaxDiv') else 0
+        
+        Cd = W + G + Bon_lag - TaxW + Div_lag - TaxDiv
+        
+        # Handle accumulated forced savings from the past
+        if self._flagCons == 0:
+            # Ignore unfilled past demand
+            pass
+        elif self._flagCons == 1:
+            # Spend all savings
+            Cd += self._SavAcc
+            self._SavAcc = 0
+        else:  # flagCons == 2 (default)
+            # Slow spend of unfulfilled past consumption
+            # Recover up to a limit of current consumption
+            SavAcc = self._SavAcc
+            Crec_limit = Cd * self._Crec  # Max recovery limit
+            
+            if SavAcc <= Crec_limit:
+                # Fit in limit: use all savings
+                Cd += SavAcc
+                self._SavAcc = 0
+            else:
+                # No: spend the limit
+                Cd += Crec_limit
+                self._SavAcc -= Crec_limit
+        
+        self._Cd = max(Cd, 0)
     
     def _financial_operations(self):
-        """Financial operations: profits, taxes, dividends"""
+        """
+        Financial operations: profits, taxes, dividends
+        Includes aggregate financial statistics
+        """
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         fin_sector = self.financial_sector
@@ -664,10 +856,15 @@ class Country(Agent):
                 if worker._employed > 0:
                     worker._wReal *= wage_growth
         
+        # Total wages paid
+        labor._W = total_wages * labor._Lscale  # Scale up to notional labor force
+        
         # Simplified profit calculation
         cap_sector._Pi1 = cap_sector._Q1e * cap_sector._p1avg * 0.1  # 10% margin
         con_sector._Pi2 = con_sector._S2 * 0.1
-        fin_sector._PiB = 0.0  # Banks TBD
+        
+        # Compute financial sector profits and aggregates
+        self._compute_financial_aggregates()
         
         # Taxes
         cap_sector._Tax1 = max(0, cap_sector._Pi1 * self._tr) if self._flagTax else 0
@@ -688,82 +885,544 @@ class Country(Agent):
         cap_sector._NW1 = sum(f._NW1 for f in cap_sector.firms)
         con_sector._NW2 = sum(f._NW2 for f in con_sector.firms)
     
-    def _government_operations(self):
-        """Government fiscal operations"""
-        # Primary deficit
-        self._DefP = self._G - self._Tax
-        
-        # Total deficit (including interest)
-        interest_payment = self._Deb * self.financial_sector._rBonds
-        self._Def = self._DefP + interest_payment
-        
-        # Update debt
-        self._Deb += self._Def
-    
-    def _compute_aggregates(self):
-        """Compute aggregate macroeconomic variables"""
+    def _compute_financial_aggregates(self):
+        """
+        Compute financial sector aggregate variables
+        Implements BadDeb, BadDeb1, BadDeb2, Depo, Loans, NWb, PiB, DivB, 
+        Gbail, Cl, ExRes, BondsB, BondsCB equations
+        """
+        fin = self.financial_sector
+        cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         
-        # Real GDP (C + I in real terms)
-        self._Creal = con_sector._Q2e * con_sector._pC0
-        self._GDPreal = max(self._Creal + con_sector._Ireal, 1.0)
+        # BadDeb1 equation - bad debt from capital sector
+        BadDeb1 = 0.0
+        for firm in cap_sector.firms:
+            if hasattr(firm, '_BadDeb1'):
+                BadDeb1 += firm._BadDeb1
         
-        # Nominal GDP
-        self._GDPnom = max(self._C + con_sector._Inom + con_sector._dNnom, 1.0)
+        # BadDeb2 equation - bad debt from consumption sector  
+        BadDeb2 = 0.0
+        for firm in con_sector.firms:
+            if hasattr(firm, '_BadDeb2'):
+                BadDeb2 += firm._BadDeb2
         
-        # Overall productivity
+        # BadDeb equation - total bad debt
+        fin._BadDeb1 = BadDeb1
+        fin._BadDeb2 = BadDeb2
+        fin._BadDeb = BadDeb1 + BadDeb2
+        
+        # Depo equation - total deposits
+        Depo = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_Depo'):
+                Depo += bank._Depo
+        fin._Depo = Depo
+        
+        # Loans equation - total loans
+        Loans = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_Loans'):
+                Loans += bank._Loans
+        fin._Loans = Loans
+        
+        # NWb equation - total bank net worth
+        NWb = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_NWb'):
+                NWb += bank._NWb
+        fin._NWb = NWb
+        
+        # Cl equation - total clients
+        Cl = 0
+        for bank in fin.banks:
+            if hasattr(bank, '_Cl'):
+                Cl += bank._Cl
+        fin._Cl = Cl
+        
+        # ExRes equation - excess reserves
+        ExRes = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_ExRes'):
+                ExRes += bank._ExRes
+        fin._ExRes = ExRes
+        
+        # BondsB equation - bonds held by banks
+        BondsB = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_BondsB'):
+                BondsB += bank._BondsB
+        fin._BondsB = BondsB
+        
+        # PiB equation - total bank profits
+        PiB = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_PiB'):
+                PiB += bank._PiB
+        fin._PiB = PiB
+        
+        # Gbail equation - government bailouts
+        Gbail = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_Gbail'):
+                Gbail += bank._Gbail
+        fin._Gbail = Gbail
+        
+        # BS equation - bond supply
+        # Sovereign bond supply (new issues) from government
+        Def = self._Def
+        DepoG_lag = self.read_sector('_DepoG', fin, lag=1, default=0)
+        BondsB_lag = self.read_sector('_BondsB', fin, lag=1, default=0)
+        BondsCB_lag = self.read_sector('_BondsCB', fin, lag=1, default=0)
+        thetaBonds = getattr(fin, '_thetaBonds', 10.0)
+        
+        bonds_maturing = (BondsB_lag + BondsCB_lag) / thetaBonds
+        
+        if Def + bonds_maturing < DepoG_lag:
+            # No new bonds to supply
+            fin._BS = 0
+            fin._DepoG = DepoG_lag - Def - bonds_maturing
+        else:
+            # Issue just what is needed
+            fin._BS = Def + bonds_maturing - DepoG_lag
+            fin._DepoG = 0
+        
+        # BD equation - bond demand from banks (sum of _BD from banks)
+        BD = 0.0
+        for bank in fin.banks:
+            if hasattr(bank, '_BD'):
+                BD += bank._BD
+        fin._BD = BD
+        
+        # BondsCB equation - bonds held by central bank (residual)
+        # Central bank absorbs all outstanding bonds issued
+        BondsCB_current = self.read_sector('_BondsCB', fin, lag=0, default=0)
+        fin._BondsCB = max(0, BondsCB_current * (1 - 1/thetaBonds) + fin._BS - fin._BD)
+        
+        # PiCB equation - central bank profits
+        # Interest on bonds held + reserves - interest on deposits
+        rBonds = fin._rBonds
+        rRes = fin._rRes
+        PiCB = fin._BondsCB * rBonds - fin._DepoG * rRes
+        fin._PiCB = PiCB
+    
+    def _government_operations(self):
+        """
+        Government fiscal operations
+        Implements Tax, TaxDiv, Def, DefP, Deb equations from fun_KS_country.h
+        """
+        fin = self.financial_sector
+        
+        # Total tax revenue (Tax equation)
+        cap_sector = self.capital_sector
+        con_sector = self.consumption_sector
+        self._Tax = cap_sector._Tax1 + con_sector._Tax2 + fin._TaxB
+        
+        # Dividend tax (TaxDiv equation)
+        if self._flagTax >= 2:
+            self._TaxDiv = self._Div * self._tr
+        else:
+            self._TaxDiv = 0.0
+        
+        # Add dividend tax to total tax
+        self._Tax += self._TaxDiv
+        
+        # Primary deficit (DefP equation)
+        # Government expenditure minus tax revenue
+        self._DefP = self._G - self._Tax
+        
+        # Total deficit (Def equation)
+        # Primary deficit plus interest payments on public debt
+        rBonds = fin._rBonds if hasattr(fin, '_rBonds') else fin._r
+        interest_payment = self._Deb * rBonds
+        self._Def = self._DefP + interest_payment
+        
+        # Update public debt (Deb equation)
+        # Debt increases by deficit amount
+        self._Deb += self._Def
+    
+    def read_sector(self, attr: str, sector, lag: int = 0, default=0):
+        """
+        Read lagged value from a sector object
+        
+        Args:
+            attr: Attribute name (with or without leading _)
+            sector: Sector object
+            lag: Number of periods back
+            default: Default value if not available
+            
+        Returns:
+            Value or default
+        """
+        if not attr.startswith('_'):
+            attr = f'_{attr}'
+        
+        if lag == 0:
+            return getattr(sector, attr, default)
+        elif hasattr(sector, '_lags') and attr in sector._lags:
+            if lag <= len(sector._lags[attr]):
+                return sector._lags[attr][-lag]
+        return default
+    
+    def _compute_aggregates(self):
+        """
+        Compute aggregate macroeconomic variables
+        Implements GDPreal, GDPnom, A, dAb, dGDP, Creal equations
+        """
+        con_sector = self.consumption_sector
+        cap_sector = self.capital_sector
         labor = self.labor_market
-        self._A = safe_divide(self._GDPreal, labor._L) if labor._L > 0 else self._A
         
-        # GDP growth
+        # Real consumption (Creal equation)
+        # Actual consumption in quantity terms using base price
+        pC0 = con_sector._pC0  # Base price level
+        self._Creal = safe_divide(self._C, con_sector._p2avg) * pC0 if con_sector._p2avg > 0 else 0
+        
+        # Real investment
+        # Investment in capital goods
+        Ireal = con_sector._Ireal if hasattr(con_sector, '_Ireal') else 0.0
+        
+        # Real GDP (GDPreal equation)
+        # GDP = C + I + ΔN (in real terms)
+        dNreal = 0.0
         if self._t > 1:
-            gdp_prev = self.read('_GDPreal', lag=1)
-            if gdp_prev and gdp_prev > 0:
-                self._dGDP = math.log(self._GDPreal) - math.log(gdp_prev)
+            N_current = con_sector._N
+            N_lag = self.read_sector('_N', con_sector, lag=1, default=0)
+            # Convert to real terms
+            dNreal = safe_divide(N_current - N_lag, con_sector._p2avg) * pC0 if con_sector._p2avg > 0 else 0
+        
+        self._GDPreal = max(self._Creal + Ireal + dNreal, 1.0)
+        
+        # Nominal GDP (GDPnom equation)
+        # GDP in current prices
+        Inom = con_sector._Inom if hasattr(con_sector, '_Inom') else 0.0
+        dNnom = con_sector._dNnom if hasattr(con_sector, '_dNnom') else 0.0
+        self._GDPnom = max(self._C + Inom + dNnom, 1.0)
+        
+        # Overall productivity (A equation)
+        # GDP per worker
+        if labor._L > 0:
+            self._A = safe_divide(self._GDPreal, labor._L)
+        else:
+            # Keep previous value if no workers
+            self._A = self.read('_A', lag=1, default=INIPROD)
+        
+        # Productivity growth (dAb equation - bounded)
+        if self._t > 1:
+            A_lag = self.read('_A', lag=1, default=INIPROD)
+            if A_lag > 0:
+                dA = (self._A - A_lag) / A_lag
+                # Bound by mLim
+                mLim = self._mLim if self._mLim > 0 else float('inf')
+                self._dAb = max(min(dA, mLim), -mLim)
+            else:
+                self._dAb = 0.0
+        else:
+            self._dAb = 0.0
+        
+        # GDP growth rate (dGDP equation - bounded)
+        if self._t > 1:
+            GDPreal_lag = self.read('_GDPreal', lag=1, default=1.0)
+            if GDPreal_lag > 0:
+                dGDP = (self._GDPreal - GDPreal_lag) / GDPreal_lag
+                # Bound by mLim
+                mLim = self._mLim if self._mLim > 0 else float('inf')
+                self._dGDP = max(min(dGDP, mLim), -mLim)
+            else:
+                self._dGDP = 0.0
+        else:
+            self._dGDP = 0.0
         
         # Inflation (price level change)
-        prev_price = self.read('_p2avg', lag=1) if self._t > 1 else con_sector._p2avg
-        if prev_price and prev_price > 0:
-            self._inflation = (con_sector._p2avg - prev_price) / prev_price
+        if self._t > 1:
+            prev_price = self.read_sector('_p2avg', con_sector, lag=1, default=pC0)
+            if prev_price > 0:
+                self._inflation = (con_sector._p2avg - prev_price) / prev_price
+            else:
+                self._inflation = 0.0
         else:
             self._inflation = 0.0
         
-        # Debt ratios
+        # Debt ratios (DebGDP, DefPgdp equations)
         self._DebGDP = safe_divide(self._Deb, self._GDPnom)
         self._DefPgdp = safe_divide(self._DefP, self._GDPnom)
         
-        # Store price level for next period
-        self.write('_p2avg', con_sector._p2avg)
+        # Total dividends (Div equation)
+        self._Div = cap_sector._Div1 + con_sector._Div2 + self.financial_sector._DivB
+        
+        # Total equity (Eq equation)
+        # Sum of firm equities minus bad debt
+        cap_equity = sum(getattr(f, '_NW1', 0) for f in cap_sector.firms)
+        con_equity = sum(getattr(f, '_NW2', 0) for f in con_sector.firms)
+        bank_equity = sum(getattr(b, '_NWb', 0) for b in self.financial_sector.banks)
+        self._Eq = cap_equity + con_equity + bank_equity
     
     def _compute_government_expenditure(self):
-        """Compute government expenditure"""
+        """
+        Compute government expenditure (G equation from fun_KS_country.h)
+        Government expenditure (exogenous demand)
+        """
         labor = self.labor_market
+        fin = self.financial_sector
         
-        # Unemployment benefits
+        i = int(self._flagGovExp)  # Type of govt. expenditure
+        j = int(self._flagFiscalRule)  # Fiscal rule to apply
+        
+        # Unemployed workers
         unemployed = labor._Ls - labor._L
         
-        if self._flagGovExp < 2:
-            # Minimum income
-            self._G = unemployed * labor._w0min
-        else:
-            # Unemployment benefits
-            wU = labor._wAvg * 0.5  # 50% of average wage
-            self._G = unemployed * wU
+        # Accumulated surplus at central bank
+        DepoG_lag = self.read_sector('_DepoG', fin, lag=1) if self._t > 1 else 0
         
-        # Add training costs
-        self._G += labor._Gtrain if hasattr(labor, '_Gtrain') else 0
+        # Base expenditure
+        if i < 2:  # Work-or-die + minimum income
+            G = unemployed * labor._w0min
+        else:  # Pay unemployment benefit
+            wU = labor._wU if hasattr(labor, '_wU') else labor._wAvg * 0.5
+            G = unemployed * wU
+        
+        # Add worker training cost
+        Gtrain = labor._Gtrain if hasattr(labor, '_Gtrain') else 0
+        G += Gtrain
         
         # Growth adjustment
-        if self._flagGovExp == 1:
-            prev_G = self.read('_G', lag=1)
-            if prev_G:
-                self._G = prev_G * (1 + self._gG)
+        if i == 1:
+            G_lag = self.read('_G', lag=1) if self._t > 1 else G
+            Gtrain_lag = self.read_sector('_Gtrain', labor, lag=1) if self._t > 1 else 0
+            G += (1 + self._gG) * (G_lag - Gtrain_lag)
+        
+        # Use accumulated surplus if available
+        if DepoG_lag > 0:
+            if i == 3:  # Spend accumulated surplus
+                Def_lag = self.read('_Def', lag=1) if self._t > 1 else 0
+                G += min(DepoG_lag, max(0, -Def_lag))
+        else:
+            # Apply fiscal rule if conditions met
+            Trule = getattr(fin, '_Trule', 10)
+            if ((j == 1 or j == 3 or (j > 0 and self.read('_dGDP', lag=1, default=0) > 0)) 
+                and self._t >= Trule):
+                
+                DebRule = getattr(fin, '_DebRule', 0.6)
+                DefPrule = getattr(fin, '_DefPrule', 0.03)
+                Tax_lag = self.read('_Tax', lag=1, default=0)
+                Deb_lag = self.read('_Deb', lag=1, default=0)
+                GDPnom_lag = self.read('_GDPnom', lag=1, default=1)
+                
+                # Debt rule applies?
+                if j > 2 and safe_divide(Deb_lag, GDPnom_lag) > DebRule:
+                    deltaDeb = getattr(fin, '_deltaDeb', 0.1)
+                    target_deficit = -(Deb_lag - DebRule * GDPnom_lag) * deltaDeb
+                    G = max(G, Tax_lag + target_deficit)
+                elif j == 1 or j == 3:
+                    # Primary deficit rule
+                    G = max(G, Tax_lag - DefPrule * GDPnom_lag)
+        
+        self._G = max(G, 0)
     
     def _entry_exit(self):
-        """Handle firm entry and exit"""
-        # Simplified: no entry/exit in this basic version
-        # Will be implemented in enhanced version
-        pass
+        """
+        Handle firm entry and exit (entryExit equation)
+        Implements basic entry/exit dynamics from fun_KS_country.h
+        """
+        # Track entry/exit counts
+        exits = 0
+        entries = 0
+        
+        # Capital sector entry/exit
+        exits += self._capital_sector_exit()
+        entries += self._capital_sector_entry()
+        
+        # Consumption sector entry/exit
+        exits += self._consumption_sector_exit()
+        entries += self._consumption_sector_entry()
+        
+        # Recompute aggregates affected by entry/exit
+        self._compute_entry_exit_costs()
+        
+        # Update financial sector credit scores
+        # (pecking order for credit allocation)
+        self._update_credit_scores()
+        
+        return exits + entries
+    
+    def _capital_sector_exit(self):
+        """Exit process for capital sector firms"""
+        cap_sector = self.capital_sector
+        exits = 0
+        
+        # Identify firms to exit (negative net worth or market share too low)
+        firms_to_exit = []
+        for firm in cap_sector.firms:
+            # Exit if negative net worth
+            if firm._NW1 < 0:
+                firms_to_exit.append(firm)
+        
+        # Remove exiting firms
+        for firm in firms_to_exit:
+            # Fire all workers
+            for worker in self.workers:
+                if worker._employer == firm:
+                    worker._employed = 0
+                    worker._employer = None
+                    worker._Te = 0
+            
+            # Record exit cost/credit
+            if hasattr(firm, '_NW1'):
+                self._cExit += max(0, firm._NW1)  # Positive NW returned
+            
+            # Remove from firm list
+            cap_sector.firms.remove(firm)
+            exits += 1
+        
+        return exits
+    
+    def _capital_sector_entry(self):
+        """Entry process for capital sector firms"""
+        cap_sector = self.capital_sector
+        entries = 0
+        
+        # Check if entry is needed (maintain minimum number)
+        current_firms = len(cap_sector.firms)
+        F1min = int(cap_sector._F1min)
+        F1max = int(cap_sector._F1max)
+        
+        # Entry if below minimum and below maximum
+        if current_firms < F1min and current_firms < F1max:
+            # Create new firm
+            new_id = max([f._ID1 for f in cap_sector.firms], default=0) + 1
+            new_firm = Firm1(firm_id=new_id, parent=cap_sector)
+            
+            # Initialize with average characteristics
+            if cap_sector.firms:
+                avg_A = sum(f._Atau for f in cap_sector.firms) / len(cap_sector.firms)
+                avg_B = sum(f._Btau for f in cap_sector.firms) / len(cap_sector.firms)
+                new_firm._Atau = avg_A
+                new_firm._Btau = avg_B
+            else:
+                new_firm._Atau = INIPROD
+                new_firm._Btau = INIPROD
+            
+            # Initial values
+            new_firm._p1 = new_firm._Btau * (1 + cap_sector._mu1)
+            new_firm._NW1 = 10.0  # Initial equity
+            
+            # Record entry cost
+            self._cEntry += new_firm._NW1
+            
+            cap_sector.firms.append(new_firm)
+            entries += 1
+        
+        return entries
+    
+    def _consumption_sector_exit(self):
+        """Exit process for consumption sector firms"""
+        con_sector = self.consumption_sector
+        exits = 0
+        
+        # Identify firms to exit
+        firms_to_exit = []
+        for firm in con_sector.firms:
+            # Exit if negative net worth
+            if firm._NW2 < 0:
+                firms_to_exit.append(firm)
+        
+        # Remove exiting firms
+        for firm in firms_to_exit:
+            # Fire all workers
+            for worker in self.workers:
+                if worker._employer == firm:
+                    worker._employed = 0
+                    worker._employer = None
+                    worker._Te = 0
+            
+            # Record exit cost/credit
+            if hasattr(firm, '_NW2'):
+                self._cExit += max(0, firm._NW2)
+            
+            # Remove from firm list
+            con_sector.firms.remove(firm)
+            exits += 1
+        
+        return exits
+    
+    def _consumption_sector_entry(self):
+        """Entry process for consumption sector firms"""
+        con_sector = self.consumption_sector
+        entries = 0
+        
+        # Check if entry is needed
+        current_firms = len(con_sector.firms)
+        F2min = int(con_sector._F2min)
+        F2max = int(con_sector._F2max)
+        
+        # Entry if below minimum and below maximum
+        if current_firms < F2min and current_firms < F2max:
+            # Create new firm
+            new_id = max([f._ID2 for f in con_sector.firms], default=0) + 1
+            new_firm = Firm2(firm_id=new_id, parent=con_sector)
+            
+            # Initialize with average characteristics
+            if con_sector.firms:
+                avg_A = sum(f._A2 for f in con_sector.firms) / len(con_sector.firms)
+                new_firm._A2 = avg_A
+            else:
+                new_firm._A2 = INIPROD
+            
+            # Initial values
+            new_firm._mu2 = con_sector._mu20
+            new_firm._p2 = new_firm._A2 * (1 + new_firm._mu2)
+            new_firm._NW2 = 10.0  # Initial equity
+            
+            # Record entry cost
+            self._cEntry += new_firm._NW2
+            
+            con_sector.firms.append(new_firm)
+            entries += 1
+        
+        return entries
+    
+    def _compute_entry_exit_costs(self):
+        """
+        Compute entry/exit costs and equity changes
+        Implements cEntry, cExit, Eq equations
+        """
+        # cEntry and cExit are accumulated during entry/exit process
+        # (already done in entry/exit methods above)
+        
+        # Recompute total equity (Eq equation)
+        cap_sector = self.capital_sector
+        con_sector = self.consumption_sector
+        fin_sector = self.financial_sector
+        
+        cap_equity = sum(getattr(f, '_NW1', 0) for f in cap_sector.firms)
+        con_equity = sum(getattr(f, '_NW2', 0) for f in con_sector.firms)
+        bank_equity = sum(getattr(b, '_NWb', 0) for b in fin_sector.banks)
+        
+        self._Eq = cap_equity + con_equity + bank_equity
+    
+    def _update_credit_scores(self):
+        """
+        Update credit scores and pecking order
+        Sets the credit allocation pecking order for firms
+        """
+        # This will be used by banks for credit allocation
+        # For now, just store firm rankings by net worth to sales ratio
+        cap_sector = self.capital_sector
+        con_sector = self.consumption_sector
+        
+        # Rank capital sector firms
+        for firm in cap_sector.firms:
+            if hasattr(firm, '_S1') and firm._S1 > 0:
+                firm._credit_score = safe_divide(firm._NW1, firm._S1)
+            else:
+                firm._credit_score = 0.0
+        
+        # Rank consumption sector firms
+        for firm in con_sector.firms:
+            if hasattr(firm, '_S2') and firm._S2 > 0:
+                firm._credit_score = safe_divide(firm._NW2, firm._S2)
+            else:
+                firm._credit_score = 0.0
     
     def simulate(self, periods: int) -> Dict:
         """
