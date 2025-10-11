@@ -166,6 +166,47 @@ def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, A
     return merged
 
 
+# Scenario mapping - maps scenario names to YAML configuration files
+SCENARIO_CONFIGS = {
+    'baseline': 'configs/baseline.yaml',
+    'cent_wage_baseline_v2': 'configs/cent_wage_baseline_v2.yaml',
+    'cent_wage_benchmark_v1': 'configs/cent_wage_benchmark_v1.yaml',
+    'no_skills_fix_entry_no_fin': 'configs/no_skills_fix_entry_no_fin.yaml',
+    'ten_skills_free_entry_bas_fin': 'configs/ten_skills_free_entry_bas_fin.yaml',
+    'ten_skills_free_entry_full_fin': 'configs/ten_skills_free_entry_full_fin.yaml',
+    'ten_skills_free_entry_no_fin': 'configs/ten_skills_free_entry_no_fin.yaml',
+    'sim1': 'configs/sim1.yaml',
+    'sim2': 'configs/sim2.yaml',
+    'sa_ee': 'configs/sa_ee.yaml',
+    'sa_sobol': 'configs/sa_sobol.yaml',
+}
+
+
+def load_scenario(scenario_name: str, base_path: str = '.') -> Dict[str, Any]:
+    """
+    Load a predefined scenario configuration by name
+    
+    Args:
+        scenario_name: Name of scenario (e.g., 'baseline', 'cent_wage_baseline_v2')
+        base_path: Base path to search for configuration files
+        
+    Returns:
+        Configuration dictionary
+        
+    Raises:
+        ValueError: If scenario name is unknown
+        FileNotFoundError: If configuration file not found
+    """
+    if scenario_name not in SCENARIO_CONFIGS:
+        available = ', '.join(SCENARIO_CONFIGS.keys())
+        raise ValueError(f"Unknown scenario '{scenario_name}'. Available: {available}")
+    
+    config_file = SCENARIO_CONFIGS[scenario_name]
+    config_path = Path(base_path) / config_file
+    
+    return load_config(str(config_path))
+
+
 if __name__ == "__main__":
     # Test configuration loading
     import sys

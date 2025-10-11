@@ -4,6 +4,10 @@ Verification script to check K+S Model Python implementation completeness
 Compares Python implementation against C++ original equations
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import os
 import re
 from pathlib import Path

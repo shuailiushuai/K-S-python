@@ -4,8 +4,13 @@ Complete K+S Model Validation Test
 Tests all major components and equations
 """
 
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from model import Country
-from model.config_parser import load_scenario
+from config import load_scenario
 import sys
 
 

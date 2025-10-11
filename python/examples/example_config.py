@@ -3,6 +3,10 @@ Example: Configuration System and LSD File Parsing
 Demonstrates loading and using configuration files
 """
 
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from model import Country, LSDConfigParser, load_scenario
 from model.random_engine import random_engine
 from pathlib import Path

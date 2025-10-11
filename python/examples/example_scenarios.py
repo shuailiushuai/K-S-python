@@ -3,6 +3,11 @@ K+S Model - Scenario Comparison Example
 Demonstrates running multiple scenarios and comparing results
 """
 
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from model.country import Country
 from model.random_engine import random_engine
 import sys

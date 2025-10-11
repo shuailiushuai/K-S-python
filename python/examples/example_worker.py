@@ -3,6 +3,12 @@ Example: Basic Worker Agent Usage
 Demonstrates the worker agent implementation
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from model.worker import Worker
 from model.agent import Agent
 from model.random_engine import random_engine
