@@ -418,6 +418,15 @@ class FinancialSector(Agent):
         self._DepoG = 0.0                 # Government deposits
         self._PiCB = 0.0                  # Central bank profits
         self._Cl = 0                      # Total clients
+        self._BadDeb = 0.0                # Total bad debt
+        self._BadDeb1 = 0.0               # Bad debt sector 1
+        self._BadDeb2 = 0.0               # Bad debt sector 2
+        self._Loans = 0.0                 # Total loans
+        self._LoansCB = 0.0               # Loans from central bank
+        self._Depo = 0.0                  # Total deposits
+        self._Res = 0.0                   # Total reserves
+        self._ExRes = 0.0                 # Excess reserves
+        self._NWb = 0.0                   # Banking sector net worth
         
         # Banks list
         self.banks: List[Bank] = []
@@ -442,6 +451,7 @@ class FinancialSector(Agent):
         Res = 0.0
         ExRes = 0.0
         NWb = 0.0
+        Gbail = 0.0
         
         # Aggregate bank-level variables
         for bank in self.banks:
@@ -458,6 +468,7 @@ class FinancialSector(Agent):
             Res += getattr(bank, '_Res', 0.0)
             ExRes += getattr(bank, '_ExRes', 0.0)
             NWb += getattr(bank, '_NWb', 0.0)
+            Gbail += getattr(bank, '_Gbail', 0.0)
         
         # Store aggregates
         self.write("BadDeb", BadDeb1 + BadDeb2)
@@ -469,6 +480,19 @@ class FinancialSector(Agent):
         self.write("Res", Res)
         self.write("ExRes", ExRes)
         self.write("NWb", NWb)
+        self.write("Gbail", Gbail)
+        
+        # Store as instance variables for easy access
+        self._BadDeb = BadDeb1 + BadDeb2
+        self._BadDeb1 = BadDeb1
+        self._BadDeb2 = BadDeb2
+        self._Loans = Loans
+        self._LoansCB = LoansCB
+        self._Depo = Depo
+        self._Res = Res
+        self._ExRes = ExRes
+        self._NWb = NWb
+        self._Gbail = Gbail
         
         # Central bank profits (simplified: interest on bonds held by CB)
         BondsCB = getattr(self, '_BondsCB', 0.0)

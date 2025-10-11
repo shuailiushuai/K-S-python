@@ -73,7 +73,64 @@ class StatisticsCollector(Agent):
         
         # Capacity statistics
         self._Deb1max = 0.0               # Maximum debt sector 1
+        self._Deb2max = 0.0               # Maximum debt sector 2
         self._HCavg = 0.0                 # Average capacity utilization
+        self._NCavg = 0.0                 # Average number of clients
+        
+        # Sector 2 specific statistics
+        self._CD2 = 0.0                   # Change in demand sector 2
+        self._CD2c = 0.0                  # Change in real demand sector 2
+        self._CS2 = 0.0                   # Demand per capita sector 2
+        self._A2sd = 0.0                  # Std dev productivity sector 2
+        self._A2posChg = 0.0              # Positive A changes sector 2
+        self._A2preChg = 0.0              # Negative A changes sector 2
+        self._mu2avg = 0.0                # Average mark-up sector 2
+        self._age1avg = 0.0               # Average age sector 1
+        self._age2avg = 0.0               # Average age sector 2
+        self._s1avg = 0.0                 # Average skill sector 1
+        self._s2avg = 0.0                 # Average skill sector 2
+        self._HH1 = 0.0                   # HHI sector 1
+        self._HH2 = 0.0                   # HHI sector 2
+        self._HP1 = 0.0                   # HHI percent sector 1
+        self._HP2 = 0.0                   # HHI percent sector 2
+        
+        # Labor mobility statistics
+        self._L1ent = 0                   # Entrants sector 1
+        self._L1exit = 0                  # Exits sector 1
+        self._L2ent = 0                   # Entrants sector 2
+        self._L2exit = 0                  # Exits sector 2
+        self._Lent = 0                    # Total entrants
+        self._Lexit = 0                   # Total exits
+        self._L1v = 0                     # Vacancies sector 1
+        self._L2v = 0                     # Vacancies sector 2
+        self._V = 0                       # Total vacancies
+        
+        # Investment and savings
+        self._EId = 0.0                   # Expansion investment demand
+        self._SId = 0.0                   # Substitution investment demand
+        self._RS2 = 0.0                   # Desired machine orders sector 2
+        self._RD = 0.0                    # R&D expenditure sector 1
+        
+        # Wage and income statistics
+        self._dN = 0.0                    # Change in inventories (nominal)
+        self._dw = 0.0                    # Wage growth rate
+        self._wAvgReal = 0.0              # Real average wage
+        self._TuAvg = 0.0                 # Average unemployment duration
+        
+        # Firm counts
+        self._B2payers = 0                # Firms paying bonuses sector 2
+        self._noWrk2 = 0                  # Firms without workers sector 2
+        self._part = 0.0                  # Participation rate
+        
+        # Quality and technology
+        self._q2posChg = 0                # Positive quality changes sector 2
+        self._q2preChg = 0                # Negative quality changes sector 2
+        self._w2realPosChg = 0            # Positive real wage changes sector 2
+        self._w2realPreChg = 0            # Negative real wage changes sector 2
+        self._nBrochAvg = 0.0             # Average brochures sent
+        self._w2oMin = 0.0                # Minimum wage offer sector 2
+        self._w2avgLarg = 0.0             # Average wage large firms sector 2
+        self._L2larg = 0                  # Employment large firms sector 2
     
     def compute_macro_aggregates(self, country):
         """
@@ -293,6 +350,309 @@ class StatisticsCollector(Agent):
         # Bank failures
         self._Bfail = getattr(fin_sector, '_Bfail', 0)
     
+    def compute_sector2_statistics(self, country):
+        """
+        Compute sector 2 (consumption) specific statistics
+        
+        Args:
+            country: Country object
+        """
+        con_sector = country.consumption_sector
+        labor = country.labor_market
+        
+        if not con_sector.firms:
+            return
+        
+        # Demand changes sector 2
+        D2 = con_sector._D2 if hasattr(con_sector, '_D2') else 0.0
+        D2_prev = self.read_from(con_sector, '_D2', lag=1)
+        if D2_prev:
+            self._CD2 = D2 - D2_prev
+        else:
+            self._CD2 = 0.0
+        
+        # Real demand change sector 2
+        if D2_prev and D2_prev > 0:
+            self._CD2c = (D2 - D2_prev) / D2_prev
+        else:
+            self._CD2c = 0.0
+        
+        # Per capita demand sector 2
+        self._CS2 = safe_divide(D2, labor._Ls) if labor._Ls > 0 else 0.0
+        
+        # Productivity statistics sector 2
+        A2_values = [f._A2 for f in con_sector.firms if hasattr(f, '_A2') and f._A2 > 0]
+        if A2_values:
+            n = len(A2_values)
+            avg = sum(A2_values) / n
+            variance = sum((x - avg)**2 for x in A2_values) / n if n > 1 else 0.0
+            self._A2sd = math.sqrt(variance)
+        else:
+            self._A2sd = 0.0
+        
+        # Count productivity changes
+        pos_changes = 0
+        neg_changes = 0
+        for firm in con_sector.firms:
+            if hasattr(firm, '_A2'):
+                A2_old = self.read_from(firm, '_A2', lag=1)
+                if A2_old and A2_old > 0:
+                    change = (firm._A2 - A2_old) / A2_old
+                    if change > 0:
+                        pos_changes += 1
+                    elif change < 0:
+                        neg_changes += 1
+        
+        self._A2posChg = pos_changes
+        self._A2preChg = neg_changes
+        
+        # Average mark-up sector 2
+        mu2_values = [f._mu2 for f in con_sector.firms if hasattr(f, '_mu2')]
+        self._mu2avg = sum(mu2_values) / len(mu2_values) if mu2_values else 0.0
+        
+        # Average ages
+        age2_values = [f._t2ent for f in con_sector.firms if hasattr(f, '_t2ent')]
+        t = country._t if hasattr(country, '_t') else 0
+        ages = [t - entry_time for entry_time in age2_values]
+        self._age2avg = sum(ages) / len(ages) if ages else 0.0
+        
+        # Average skills sector 2
+        s2_values = []
+        for firm in con_sector.firms:
+            if hasattr(firm, '_workers'):
+                for worker in firm._workers:
+                    if hasattr(worker, '_s'):
+                        s2_values.append(worker._s)
+        self._s2avg = sum(s2_values) / len(s2_values) if s2_values else 0.0
+        
+        # Herfindahl index sector 2
+        total_sales = sum(f._S2 for f in con_sector.firms if hasattr(f, '_S2'))
+        if total_sales > 0:
+            shares = [safe_divide(f._S2, total_sales) for f in con_sector.firms if hasattr(f, '_S2')]
+            self._HH2 = sum(s**2 for s in shares)
+            self._HP2 = self._HH2 * 100
+        else:
+            self._HH2 = 0.0
+            self._HP2 = 0.0
+        
+        # Maximum debt sector 2
+        Deb2_values = [f._Deb2 for f in con_sector.firms if hasattr(f, '_Deb2')]
+        self._Deb2max = max(Deb2_values) if Deb2_values else 0.0
+        
+        # Count bonus payers
+        self._B2payers = sum(1 for f in con_sector.firms if hasattr(f, '_Bon2') and f._Bon2 > 0)
+        
+        # Count firms without workers
+        self._noWrk2 = sum(1 for f in con_sector.firms if hasattr(f, '_L2') and f._L2 == 0)
+        
+        # Quality changes
+        q2_pos = 0
+        q2_neg = 0
+        for firm in con_sector.firms:
+            if hasattr(firm, '_q2'):
+                q2_old = self.read_from(firm, '_q2', lag=1)
+                if q2_old and q2_old > 0:
+                    if firm._q2 > q2_old:
+                        q2_pos += 1
+                    elif firm._q2 < q2_old:
+                        q2_neg += 1
+        
+        self._q2posChg = q2_pos
+        self._q2preChg = q2_neg
+        
+        # Average number of clients
+        NC_values = [f._NC for f in con_sector.firms if hasattr(f, '_NC')]
+        self._NCavg = sum(NC_values) / len(NC_values) if NC_values else 0.0
+    
+    def compute_sector1_statistics(self, country):
+        """
+        Compute sector 1 (capital goods) specific statistics
+        
+        Args:
+            country: Country object
+        """
+        cap_sector = country.capital_sector
+        
+        if not cap_sector.firms:
+            return
+        
+        # Average ages sector 1
+        age1_values = [f._t1ent for f in cap_sector.firms if hasattr(f, '_t1ent')]
+        t = country._t if hasattr(country, '_t') else 0
+        ages = [t - entry_time for entry_time in age1_values]
+        self._age1avg = sum(ages) / len(ages) if ages else 0.0
+        
+        # Average skills sector 1
+        s1_values = []
+        for firm in cap_sector.firms:
+            if hasattr(firm, '_workers'):
+                for worker in firm._workers:
+                    if hasattr(worker, '_s'):
+                        s1_values.append(worker._s)
+        self._s1avg = sum(s1_values) / len(s1_values) if s1_values else 0.0
+        
+        # Herfindahl index sector 1
+        total_sales = sum(f._S1 for f in cap_sector.firms if hasattr(f, '_S1'))
+        if total_sales > 0:
+            shares = [safe_divide(f._S1, total_sales) for f in cap_sector.firms if hasattr(f, '_S1')]
+            self._HH1 = sum(s**2 for s in shares)
+            self._HP1 = self._HH1 * 100
+        else:
+            self._HH1 = 0.0
+            self._HP1 = 0.0
+        
+        # Average brochures sent
+        broch_values = [f._nBroch for f in cap_sector.firms if hasattr(f, '_nBroch')]
+        self._nBrochAvg = sum(broch_values) / len(broch_values) if broch_values else 0.0
+    
+    def compute_labor_mobility_statistics(self, country):
+        """
+        Compute labor mobility statistics (entry/exit between sectors)
+        
+        Args:
+            country: Country object
+        """
+        cap_sector = country.capital_sector
+        con_sector = country.consumption_sector
+        labor = country.labor_market
+        
+        # These would be tracked during labor market operations
+        # For now, approximate from sector changes
+        L1 = cap_sector._L1 if hasattr(cap_sector, '_L1') else 0
+        L2 = con_sector._L2 if hasattr(con_sector, '_L2') else 0
+        L1_prev = self.read_from(cap_sector, '_L1', lag=1)
+        L2_prev = self.read_from(con_sector, '_L2', lag=1)
+        
+        # Entries and exits (simplified approximation)
+        if L1_prev is not None:
+            delta_L1 = L1 - L1_prev
+            self._L1ent = max(delta_L1, 0)
+            self._L1exit = max(-delta_L1, 0)
+        else:
+            self._L1ent = 0
+            self._L1exit = 0
+        
+        if L2_prev is not None:
+            delta_L2 = L2 - L2_prev
+            self._L2ent = max(delta_L2, 0)
+            self._L2exit = max(-delta_L2, 0)
+        else:
+            self._L2ent = 0
+            self._L2exit = 0
+        
+        self._Lent = self._L1ent + self._L2ent
+        self._Lexit = self._L1exit + self._L2exit
+        
+        # Vacancies
+        L1d = cap_sector._L1d if hasattr(cap_sector, '_L1d') else 0
+        L2d = con_sector._L2d if hasattr(con_sector, '_L2d') else 0
+        self._L1v = max(L1d - L1, 0)
+        self._L2v = max(L2d - L2, 0)
+        self._V = self._L1v + self._L2v
+    
+    def compute_investment_statistics(self, country):
+        """
+        Compute investment-related statistics
+        
+        Args:
+            country: Country object
+        """
+        con_sector = country.consumption_sector
+        
+        # Expansion and substitution investment
+        EI_total = sum(f._EI for f in con_sector.firms if hasattr(f, '_EI'))
+        SI_total = sum(f._SI for f in con_sector.firms if hasattr(f, '_SI'))
+        
+        self._EId = EI_total
+        self._SId = SI_total
+        
+        # Desired machine orders (substitution + expansion)
+        self._RS2 = SI_total + EI_total
+        
+        # R&D expenditure
+        cap_sector = country.capital_sector
+        RD_total = sum(f._RD for f in cap_sector.firms if hasattr(f, '_RD'))
+        self._RD = RD_total
+    
+    def compute_wage_statistics(self, country):
+        """
+        Compute wage-related statistics
+        
+        Args:
+            country: Country object
+        """
+        labor = country.labor_market
+        con_sector = country.consumption_sector
+        
+        # Change in inventories (nominal)
+        dN_nom = con_sector._dNnom if hasattr(con_sector, '_dNnom') else 0.0
+        self._dN = dN_nom
+        
+        # Wage growth rate
+        wAvg = labor._wAvg
+        wAvg_prev = self.read_from(labor, '_wAvg', lag=1)
+        if wAvg_prev and wAvg_prev > 0:
+            self._dw = (wAvg - wAvg_prev) / wAvg_prev
+        else:
+            self._dw = 0.0
+        
+        # Real average wage
+        CPI = con_sector._p2avg if hasattr(con_sector, '_p2avg') else 1.0
+        self._wAvgReal = safe_divide(wAvg, CPI)
+        
+        # Average unemployment duration
+        # This requires tracking unemployment spells - simplified version
+        if hasattr(labor, '_TuAvg'):
+            self._TuAvg = labor._TuAvg
+        else:
+            self._TuAvg = 0.0
+        
+        # Participation rate
+        Ls = labor._Ls
+        Lscale = country._Lscale if hasattr(country, '_Lscale') else 1
+        total_population = Ls * Lscale
+        # Assume working-age population is proportional to total
+        # This is a simplification; real model might track this separately
+        self._part = 1.0  # Simplified: assume 100% participation
+        
+        # Sector 2 wage statistics
+        if con_sector.firms:
+            # Minimum wage offer
+            w2o_values = [f._w2o for f in con_sector.firms if hasattr(f, '_w2o') and f._w2o > 0]
+            self._w2oMin = min(w2o_values) if w2o_values else 0.0
+            
+            # Large firms (top quartile by size)
+            firms_by_size = sorted(con_sector.firms, 
+                                 key=lambda f: getattr(f, '_L2', 0), 
+                                 reverse=True)
+            n_large = max(1, len(firms_by_size) // 4)
+            large_firms = firms_by_size[:n_large]
+            
+            # Average wage in large firms
+            w2_large = [f._w2 for f in large_firms if hasattr(f, '_w2')]
+            self._w2avgLarg = sum(w2_large) / len(w2_large) if w2_large else 0.0
+            
+            # Employment in large firms
+            self._L2larg = sum(f._L2 for f in large_firms if hasattr(f, '_L2'))
+            
+            # Real wage changes in sector 2
+            w2_real_pos = 0
+            w2_real_neg = 0
+            for firm in con_sector.firms:
+                if hasattr(firm, '_w2'):
+                    w2_real = safe_divide(firm._w2, CPI)
+                    w2_real_prev = self.read_from(firm, '_w2', lag=1)
+                    if w2_real_prev:
+                        w2_real_prev_adj = safe_divide(w2_real_prev, 
+                                                       self.read('_pC', lag=1) or CPI)
+                        if w2_real > w2_real_prev_adj:
+                            w2_real_pos += 1
+                        elif w2_real < w2_real_prev_adj:
+                            w2_real_neg += 1
+            
+            self._w2realPosChg = w2_real_pos
+            self._w2realPreChg = w2_real_neg
+    
     def compute_all_statistics(self, country):
         """
         Compute all statistics for current period
@@ -303,6 +663,11 @@ class StatisticsCollector(Agent):
         self.compute_macro_aggregates(country)
         self.compute_sectoral_statistics(country)
         self.compute_financial_statistics(country)
+        self.compute_sector1_statistics(country)
+        self.compute_sector2_statistics(country)
+        self.compute_labor_mobility_statistics(country)
+        self.compute_investment_statistics(country)
+        self.compute_wage_statistics(country)
     
     def read_from(self, obj, attr: str, lag: int = 0) -> Optional[float]:
         """
