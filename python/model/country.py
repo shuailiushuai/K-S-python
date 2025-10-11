@@ -137,6 +137,59 @@ class CapitalSector(Agent):
         self._MC1 = math.log(max(NW1_lag, 0) + 1) - math.log(Deb1_lag + 1)
         self.write("MC1", self._MC1)
         return self._MC1
+    
+    def compute_wage_average(self, w2avg_fallback: float = 1.0) -> float:
+        """
+        Compute average wage in capital sector (w1avg equation from fun_KS_capital.h)
+        Average wage paid by firms in capital-good sector
+        
+        Args:
+            w2avg_fallback: Fallback wage if no workers in sector 1
+        
+        Returns:
+            Average wage in sector 1
+        """
+        L1 = self._L1d  # Workers in sector 1
+        
+        if L1 == 0:
+            # No workers - use sector 2 wage as proxy
+            w1avg = w2avg_fallback
+        else:
+            w1avg = safe_divide(self._W1, L1, w2avg_fallback)
+        
+        # Only update if positive
+        if w1avg > 0:
+            self._w1avg = w1avg
+            self.write("w1avg", w1avg)
+        
+        return self._w1avg if hasattr(self, '_w1avg') else w2avg_fallback
+    
+    def compute_min_tenure_skill(self, workers: List) -> float:
+        """
+        Compute minimum tenure skill in sector 1 (sT1min equation from fun_KS_capital.h)
+        Minimum tenure skill of workers in capital-good sector
+        
+        Args:
+            workers: List of all workers
+        
+        Returns:
+            Minimum tenure skill
+        """
+        # Find workers employed in sector 1
+        sector1_skills = []
+        for worker in workers:
+            # Check if worker is in capital sector (simplified - may need firm reference)
+            if hasattr(worker, '_sT'):
+                sector1_skills.append(worker._sT)
+        
+        if sector1_skills:
+            sT1min = min(sector1_skills)
+        else:
+            sT1min = INISKILL  # Default if no workers
+        
+        self._sT1min = sT1min
+        self.write("sT1min", sT1min)
+        return sT1min
 
 
 class ConsumptionSector(Agent):
