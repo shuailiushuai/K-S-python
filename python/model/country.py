@@ -41,18 +41,102 @@ class CapitalSector(Agent):
         self._Q1 = 0.0                    # Planned machine production
         self._Q1e = 0.0                   # Effective machine production
         self._L1d = 0                     # Labor demand
+        self._L1dRD = 0                   # R&D labor demand
+        self._L1rd = 0                    # R&D labor employed
         self._JO1 = 0                     # Job openings
         self._p1avg = 0.0                 # Average machine price
         self._Pi1 = 0.0                   # Sector profits
         self._Tax1 = 0.0                  # Sector taxes
+        self._W1 = 0.0                    # Wages paid
+        self._S1 = 0.0                    # Sales revenue
         self._NW1 = 0.0                   # Sector net worth
+        self._Deb1 = 0.0                  # Sector debt
         self._Div1 = 0.0                  # Sector dividends
         self._Eq1 = 0.0                   # Sector equity
         self._cEntry1 = 0.0               # Entry cost
         self._cExit1 = 0.0                # Exit credit
+        self._MC1 = 0.0                   # Market conditions index
+        self._entry1exit = 0              # Net entry (entry - exit)
+        self._fires1 = 0                  # Workers fired
+        self._hires1 = 0                  # Workers hired
+        self._quits1 = 0                  # Workers quit
+        self._retires1 = 0                # Workers retired
         
         # Firms list
         self.firms: List[Firm1] = []
+    
+    def compute_aggregates(self):
+        """
+        Compute sector-level aggregates from firm-level variables
+        Implements aggregation equations from fun_KS_capital.h
+        """
+        # Reset aggregates
+        self._D1 = 0.0
+        self._Q1 = 0.0
+        self._Q1e = 0.0
+        self._L1d = 0
+        self._L1dRD = 0
+        self._Pi1 = 0.0
+        self._Tax1 = 0.0
+        self._W1 = 0.0
+        self._S1 = 0.0
+        self._NW1 = 0.0
+        self._Deb1 = 0.0
+        self._Div1 = 0.0
+        self._Eq1 = 0.0
+        
+        n_firms = 0
+        total_price = 0.0
+        
+        # Aggregate firm-level variables
+        for firm in self.firms:
+            self._D1 += getattr(firm, '_D1', 0.0)
+            self._Q1 += getattr(firm, '_Q1', 0.0)
+            self._Q1e += getattr(firm, '_Q1e', 0.0)
+            self._L1d += getattr(firm, '_L1d', 0)
+            self._L1dRD += getattr(firm, '_L1dRD', 0)
+            self._Pi1 += getattr(firm, '_Pi1', 0.0)
+            self._Tax1 += getattr(firm, '_Tax1', 0.0)
+            self._W1 += getattr(firm, '_W1', 0.0)
+            self._S1 += getattr(firm, '_S1', 0.0)
+            self._NW1 += getattr(firm, '_NW1', 0.0)
+            self._Deb1 += getattr(firm, '_Deb1', 0.0)
+            self._Div1 += getattr(firm, '_Div1', 0.0)
+            self._Eq1 += getattr(firm, '_Eq1', 0.0)
+            
+            total_price += getattr(firm, '_p1', 1.0)
+            n_firms += 1
+        
+        # Compute average price
+        self._p1avg = safe_divide(total_price, n_firms, 1.0)
+        
+        # Store aggregates
+        self.write("D1", self._D1)
+        self.write("Q1", self._Q1)
+        self.write("Q1e", self._Q1e)
+        self.write("L1d", self._L1d)
+        self.write("L1dRD", self._L1dRD)
+        self.write("Pi1", self._Pi1)
+        self.write("Tax1", self._Tax1)
+        self.write("W1", self._W1)
+        self.write("S1", self._S1)
+        self.write("NW1", self._NW1)
+        self.write("Deb1", self._Deb1)
+        self.write("Div1", self._Div1)
+        self.write("Eq1", self._Eq1)
+        self.write("p1avg", self._p1avg)
+    
+    def compute_MC1(self) -> float:
+        """
+        Market entry conditions index in capital-good sector
+        MC1 = log(max(NW1_t-1, 0) + 1) - log(Deb1_t-1 + 1)
+        """
+        NW1_lag = self.read("NW1", 1)
+        Deb1_lag = self.read("Deb1", 1)
+        
+        self._MC1 = math.log(max(NW1_lag, 0) + 1) - math.log(Deb1_lag + 1)
+        self.write("MC1", self._MC1)
+        return self._MC1
 
 
 class ConsumptionSector(Agent):
@@ -79,27 +163,170 @@ class ConsumptionSector(Agent):
         self._D2d = 0.0                   # Desired demand
         self._D2 = 0.0                    # Fulfilled demand
         self._Q2 = 0.0                    # Planned production
+        self._Q2d = 0.0                   # Desired production
         self._Q2e = 0.0                   # Effective production
         self._S2 = 0.0                    # Sales
         self._N = 0.0                     # Inventories
         self._dNnom = 0.0                 # Change in inventories (nominal)
         self._L2d = 0                     # Labor demand
+        self._L2 = 0                      # Actual labor employed
         self._JO2 = 0                     # Job openings
         self._Id = 0.0                    # Desired investment
+        self._EI = 0.0                    # Expansion investment
+        self._SI = 0.0                    # Substitution investment
+        self._CI = 0.0                    # Canceled investment
         self._Inom = 0.0                  # Investment (nominal)
         self._Ireal = 0.0                 # Investment (real)
+        self._K = 0.0                     # Capital stock
+        self._Kd = 0.0                    # Desired capital
+        self._Knom = 0                    # Number of machines
         self._p2avg = 0.0                 # Average goods price
         self._pC0 = 1.0                   # Initial price level
+        self._CPI = 1.0                   # Consumer price index
+        self._dCPI = 0.0                  # CPI inflation
         self._Pi2 = 0.0                   # Sector profits
         self._Tax2 = 0.0                  # Sector taxes
+        self._W2 = 0.0                    # Wages paid
+        self._Bon2 = 0.0                  # Bonuses paid
         self._NW2 = 0.0                   # Sector net worth
+        self._Deb2 = 0.0                  # Sector debt
         self._Div2 = 0.0                  # Sector dividends
         self._Eq2 = 0.0                   # Sector equity
         self._cEntry2 = 0.0               # Entry cost
         self._cExit2 = 0.0                # Exit credit
+        self._MC2 = 0.0                   # Market conditions index
+        self._entry2exit = 0              # Net entry (entry - exit)
+        self._fires2 = 0                  # Workers fired
+        self._hires2 = 0                  # Workers hired
+        self._quits2 = 0                  # Workers quit
+        self._retires2 = 0                # Workers retired
+        self._w2avg = 0.0                 # Average wage
+        self._w2oAvg = 0.0                # Average wage offered
+        self._A2 = 0.0                    # Average productivity
         
         # Firms list
         self.firms: List[Firm2] = []
+    
+    def compute_aggregates(self):
+        """
+        Compute sector-level aggregates from firm-level variables
+        Implements aggregation equations from fun_KS_consumption.h
+        """
+        # Reset aggregates
+        self._Q2 = 0.0
+        self._Q2d = 0.0
+        self._Q2e = 0.0
+        self._D2e = 0.0
+        self._D2d = 0.0
+        self._S2 = 0.0
+        self._N = 0.0
+        self._L2d = 0
+        self._L2 = 0
+        self._EI = 0.0
+        self._SI = 0.0
+        self._CI = 0.0
+        self._K = 0.0
+        self._Kd = 0.0
+        self._Knom = 0
+        self._Pi2 = 0.0
+        self._Tax2 = 0.0
+        self._W2 = 0.0
+        self._Bon2 = 0.0
+        self._NW2 = 0.0
+        self._Deb2 = 0.0
+        self._Div2 = 0.0
+        self._Eq2 = 0.0
+        
+        n_firms = 0
+        total_price = 0.0
+        total_wage = 0.0
+        total_wage_offer = 0.0
+        total_productivity = 0.0
+        
+        # Aggregate firm-level variables
+        for firm in self.firms:
+            self._Q2 += getattr(firm, '_Q2', 0.0)
+            self._Q2d += getattr(firm, '_Q2d', 0.0)
+            self._Q2e += getattr(firm, '_Q2e', 0.0)
+            self._D2e += getattr(firm, '_D2e', 0.0)
+            self._S2 += getattr(firm, '_S2', 0.0)
+            self._N += getattr(firm, '_N', 0.0)
+            self._L2d += getattr(firm, '_L2d', 0)
+            self._L2 += getattr(firm, '_L2', 0)
+            self._EI += getattr(firm, '_EI', 0.0)
+            self._SI += getattr(firm, '_SI', 0.0)
+            self._CI += getattr(firm, '_CI', 0.0)
+            self._K += getattr(firm, '_K', 0.0)
+            self._Kd += getattr(firm, '_Kd', 0.0)
+            self._Knom += getattr(firm, '_Knom', 0)
+            self._Pi2 += getattr(firm, '_Pi2', 0.0)
+            self._Tax2 += getattr(firm, '_Tax2', 0.0)
+            self._W2 += getattr(firm, '_W2', 0.0)
+            self._Bon2 += getattr(firm, '_Bon2', 0.0)
+            self._NW2 += getattr(firm, '_NW2', 0.0)
+            self._Deb2 += getattr(firm, '_Deb2', 0.0)
+            self._Div2 += getattr(firm, '_Div2', 0.0)
+            self._Eq2 += getattr(firm, '_Eq2', 0.0)
+            
+            total_price += getattr(firm, '_p2', 1.0)
+            total_wage += getattr(firm, '_w2avg', 0.0)
+            total_wage_offer += getattr(firm, '_w2o', 0.0)
+            total_productivity += getattr(firm, '_A2', INIPROD)
+            n_firms += 1
+        
+        # Compute averages
+        self._p2avg = safe_divide(total_price, n_firms, 1.0)
+        self._w2avg = safe_divide(total_wage, n_firms, 1.0)
+        self._w2oAvg = safe_divide(total_wage_offer, n_firms, 1.0)
+        self._A2 = safe_divide(total_productivity, n_firms, INIPROD)
+        
+        # Compute desired demand aggregate
+        self._D2d = self._D2e  # Simplification for now
+        
+        # Compute investment aggregates
+        self._Id = self._EI + self._SI
+        self._Inom = self._Id  # Nominal = desired for now
+        
+        # Store aggregates
+        self.write("Q2", self._Q2)
+        self.write("Q2d", self._Q2d)
+        self.write("Q2e", self._Q2e)
+        self.write("D2e", self._D2e)
+        self.write("D2d", self._D2d)
+        self.write("S2", self._S2)
+        self.write("N", self._N)
+        self.write("L2d", self._L2d)
+        self.write("L2", self._L2)
+        self.write("EI", self._EI)
+        self.write("SI", self._SI)
+        self.write("CI", self._CI)
+        self.write("K", self._K)
+        self.write("Kd", self._Kd)
+        self.write("Knom", self._Knom)
+        self.write("Pi2", self._Pi2)
+        self.write("Tax2", self._Tax2)
+        self.write("W2", self._W2)
+        self.write("Bon2", self._Bon2)
+        self.write("NW2", self._NW2)
+        self.write("Deb2", self._Deb2)
+        self.write("Div2", self._Div2)
+        self.write("Eq2", self._Eq2)
+        self.write("p2avg", self._p2avg)
+        self.write("w2avg", self._w2avg)
+        self.write("w2oAvg", self._w2oAvg)
+        self.write("A2", self._A2)
+    
+    def compute_MC2(self) -> float:
+        """
+        Market entry conditions index in consumption-good sector
+        MC2 = log(max(NW2_t-1, 0) + 1) - log(Deb2_t-1 + 1)
+        """
+        NW2_lag = self.read("NW2", 1)
+        Deb2_lag = self.read("Deb2", 1)
+        
+        self._MC2 = math.log(max(NW2_lag, 0) + 1) - math.log(Deb2_lag + 1)
+        self.write("MC2", self._MC2)
+        return self._MC2
 
 
 class FinancialSector(Agent):
@@ -1072,6 +1299,14 @@ class Country(Agent):
         con_sector = self.consumption_sector
         cap_sector = self.capital_sector
         labor = self.labor_market
+        
+        # First, compute sector-level aggregations from firm-level data
+        cap_sector.compute_aggregates()
+        con_sector.compute_aggregates()
+        
+        # Compute market conditions indices
+        cap_sector.compute_MC1()
+        con_sector.compute_MC2()
         
         # Real consumption (Creal equation)
         # Actual consumption in quantity terms using base price
