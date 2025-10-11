@@ -11,6 +11,7 @@ from .vintage import VintageAgent
 from .worker import Worker
 from .bank import Bank
 from .labor import LaborMarket
+from .statistics import StatisticsCollector
 from .constants import *
 from .random_engine import random_engine
 from .support import safe_divide
@@ -214,6 +215,9 @@ class Country(Agent):
         self.financial_sector = FinancialSector(self)
         self.labor_market = LaborMarket(self)
         
+        # Statistics collector
+        self.statistics = StatisticsCollector(self)
+        
         # Workers list (managed at country level)
         self.workers: List[Worker] = []
         
@@ -378,7 +382,19 @@ class Country(Agent):
     def time_step(self):
         """
         Execute one complete time step
-        Follows the equation sequencing from the C++ model
+        Follows the equation sequencing from fun_KS.cpp::timeStep
+        
+        Exact sequence:
+        1. Central bank updates interest rates (r, rDeb, rBonds)
+        2. Consumption sector plans (D2e, Q2, L2d, Id)
+        3. Capital sector plans (D1, Q1, L1d)
+        4. Labor market matching (appl, JO1, JO2, L)
+        5. Production and pricing (Q1e, Q2e, p1avg, p2avg)
+        6. Consumption and sales (G, D2d, D2, N, Sav)
+        7. Financial operations (Pi1, Pi2, PiB, Tax1, Tax2, TaxB, NW1, NW2)
+        8. Government operations (Tax, Def, Deb)
+        9. Aggregates (GDPreal, GDPnom)
+        10. Entry/exit (entryExit)
         """
         # Increment time
         self._t += 1
@@ -392,26 +408,29 @@ class Country(Agent):
         # 3. Capital firms: R&D, orders, production, labor demand
         self._capital_planning()
         
-        # 4. Labor market: applications, matching, hiring
+        # 4. Labor market: applications, job openings, matching, hiring
         self._labor_market_matching()
         
         # 5. Production and pricing
         self._production_and_pricing()
         
-        # 6. Consumption and sales
+        # 6. Government expenditure and consumption/sales
         self._consumption_and_sales()
         
         # 7. Financial operations: profits, taxes, cash flows
         self._financial_operations()
         
-        # 8. Government operations
+        # 8. Government operations: taxes, deficit, debt
         self._government_operations()
         
-        # 9. Aggregate statistics
+        # 9. Compute aggregate statistics
         self._compute_aggregates()
         
         # 10. Entry and exit
         self._entry_exit()
+        
+        # Update statistics collector
+        self.statistics.compute_all_statistics(self)
         
         # Update lag values for next period
         self.update_lags()
@@ -775,13 +794,20 @@ class Country(Agent):
         for t in range(periods):
             self.time_step()
             
-            # Store results
+            # Store results from statistics collector
+            stats = self.statistics
             results['t'].append(self._t)
-            results['GDPreal'].append(self._GDPreal)
-            results['GDPnom'].append(self._GDPnom)
-            results['Unemployment'].append(self.labor_market._Ue)
-            results['Inflation'].append(self._inflation)
+            results['GDPreal'].append(stats._GDPreal)
+            results['GDPnom'].append(stats._GDPnom)
+            results['Unemployment'].append(stats._Ue)  # Unemployment rate %
+            results['Inflation'].append(stats._inflation * 100)  # Convert to %
             results['Debt'].append(self._Deb)
             results['Deficit'].append(self._Def)
+        
+        # Add scalar values for compatibility
+        results['L'] = stats._L
+        results['U'] = stats._Ue
+        results['A'] = stats._A
+        results['inflation'] = stats._inflation * 100
         
         return results
