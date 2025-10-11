@@ -31,6 +31,7 @@ from .firm2 import Firm2
 from .vintage import VintageAgent
 from .bank import Bank
 from .labor import LaborMarket, create_application
+from .country import Country, CapitalSector, ConsumptionSector, FinancialSector
 from .random_engine import random_engine
 
 __all__ = [
@@ -41,6 +42,10 @@ __all__ = [
     'VintageAgent',
     'Bank',
     'LaborMarket',
+    'Country',
+    'CapitalSector',
+    'ConsumptionSector',
+    'FinancialSector',
     'create_application',
     'random_engine',
 ]
