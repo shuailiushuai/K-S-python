@@ -206,6 +206,7 @@ class Country(Agent):
         self._dGDP = 0.0                  # GDP growth rate
         self._DebGDP = 0.0                # Debt to GDP ratio
         self._DefPgdp = 0.0               # Primary deficit to GDP ratio
+        self._inflation = 0.0             # Inflation rate
         
         # Create sectors
         self.capital_sector = CapitalSector(self)
@@ -248,6 +249,10 @@ class Country(Agent):
         Initialize all agents and structures
         Must be called before simulation
         """
+        # Check if already initialized
+        if hasattr(self, '_initialized') and self._initialized:
+            return
+        
         # Set initial time
         self._t = 0
         
@@ -266,6 +271,9 @@ class Country(Agent):
         
         # Compute initial aggregates
         self._compute_initial_aggregates()
+        
+        # Mark as initialized
+        self._initialized = True
     
     def _initialize_capital_sector(self):
         """Initialize capital goods firms"""
@@ -280,6 +288,10 @@ class Country(Agent):
             firm._Btau = INIPROD
             firm._p1 = INIPROD * 1.1  # Initial price
             firm._NW1 = 10.0  # Initial net worth
+            firm._Q1 = 0.0  # Production
+            firm._Q1e = 0.0  # Effective production
+            firm._L1d = 0  # Labor demand
+            firm._JO1 = 0  # Job openings
             sector.firms.append(firm)
     
     def _initialize_consumption_sector(self):
@@ -295,6 +307,12 @@ class Country(Agent):
             firm._mu2 = sector._mu20
             firm._p2 = INIPROD * 1.2  # Initial price
             firm._NW2 = 10.0  # Initial net worth
+            firm._D2e = 0.0  # Expected demand
+            firm._Q2d = 0.0  # Desired production
+            firm._Q2e = 0.0  # Effective production
+            firm._S2 = 0.0  # Sales
+            firm._L2d = 0  # Labor demand
+            firm._JO2 = 0  # Job openings
             sector.firms.append(firm)
     
     def _initialize_financial_sector(self):
@@ -313,22 +331,25 @@ class Country(Agent):
     def _initialize_labor_market(self):
         """Initialize workers"""
         labor = self.labor_market
-        Ls0 = 1000  # Initial labor supply
+        Ls0 = 1000  # Initial labor supply (notional)
         Lscale = 10  # Labor scaling factor
         
-        labor._Ls = Ls0
+        labor._Ls = Ls0  # Notional labor supply
         labor._Lscale = Lscale
         labor._w0min = 0.5  # Minimum wage
         labor._wAvg = INIWAGE
         
-        # Create initial workers
+        # Create actual worker agents (scaled down)
         num_workers = Ls0 // Lscale
         for i in range(num_workers):
             worker = Worker(worker_id=i+1, parent=labor)
             worker._age = 25  # Initial age
             worker._Tc = 12  # Contract term
             worker._wRes = INIWAGE  # Reservation wage
+            worker._wReal = INIWAGE  # Initial wage
             worker._employed = 0  # Initially unemployed
+            worker._employer = None  # No employer
+            worker._Te = 0  # Tenure
             worker._sV = INISKILL
             worker._sT = INISKILL
             self.workers.append(worker)
@@ -416,14 +437,23 @@ class Country(Agent):
         sector._L2d = 0
         sector._Id = 0.0
         
+        # Estimate total demand based on labor market
+        labor = self.labor_market
+        # Use potential labor force for initial demand estimation
+        potential_wages = labor._Ls * labor._wAvg
+        actual_wages = labor._L * labor._wAvg if labor._L > 0 else 0
+        # Start with potential, move toward actual
+        total_demand = max(potential_wages * 0.5 + actual_wages * 0.5, labor._Ls * labor._w0min)
+        
         # Each firm plans (simplified for now)
         for firm in sector.firms:
-            # Simple expectation
-            firm._D2e = max(firm._S2, 100.0)
-            firm._Q2d = firm._D2e * 1.1  # 10% buffer
+            # Simple expectation: share of total demand
+            market_share = 1.0 / len(sector.firms) if sector.firms else 1.0
+            firm._D2e = max(total_demand * market_share, 10.0)
+            firm._Q2d = firm._D2e / max(firm._p2, 0.1)  # Convert to quantity
             
-            # Labor demand
-            labor_needed = int(firm._Q2d / firm._A2) if firm._A2 > 0 else 0
+            # Labor demand based on productivity
+            labor_needed = int(firm._Q2d / max(firm._A2, 0.1))
             firm._L2d = max(labor_needed, 1)
             
             # Aggregate
@@ -441,16 +471,25 @@ class Country(Agent):
         sector._Q1 = 0.0
         sector._L1d = 0
         
-        # Machine demand from consumption sector
-        sector._D1 = self.consumption_sector._Id
+        # Firms do R&D (simplified innovation)
+        for firm in sector.firms:
+            # Simple R&D: small chance of productivity improvement each period
+            if random_engine.uniform() < 0.1:  # 10% chance per period
+                improvement = 1.0 + random_engine.uniform() * 0.05  # 0-5% improvement
+                firm._Atau *= improvement
+                firm._Btau *= improvement
+                # Update price based on new productivity (lower cost)
+                firm._p1 = firm._Btau * (1 + sector._mu1)
+        
+        # Machine demand from consumption sector (simplified for now)
+        sector._D1 = max(self.consumption_sector._Id, len(self.consumption_sector.firms) * 0.1)
         
         # Each firm plans
         for firm in sector.firms:
-            # Simple production
-            firm._Q1 = max(sector._D1 / len(sector.firms), 1.0) if sector.firms else 1.0
-            firm._L1d = int(firm._Q1) if firm._Q1 > 0 else 1
-            
-            # R&D (already implemented in Firm1)
+            # Simple production planning
+            firm._Q1 = max(sector._D1 / len(sector.firms) if sector.firms else 0, 0.5)
+            # Labor demand based on production and productivity
+            firm._L1d = max(int(firm._Q1 / max(firm._Btau, 0.1)), 1)
             
             # Aggregate
             sector._Q1 += firm._Q1
@@ -459,18 +498,64 @@ class Country(Agent):
     def _labor_market_matching(self):
         """Labor market search and match"""
         labor = self.labor_market
-        
-        # Aggregate job openings
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         
-        cap_sector._JO1 = max(0, cap_sector._L1d - sum(1 for w in self.workers if w._employed == 1))
-        con_sector._JO2 = max(0, con_sector._L2d - sum(1 for w in self.workers if w._employed == 2))
+        # Count currently employed workers in each sector
+        employed_sector1 = sum(1 for w in self.workers if w._employed == 1)
+        employed_sector2 = sum(1 for w in self.workers if w._employed == 2)
         
-        # Total employed
-        labor._L = sum(1 for w in self.workers if w._employed > 0)
+        # Calculate job openings needed
+        cap_sector._JO1 = max(0, cap_sector._L1d - employed_sector1)
+        con_sector._JO2 = max(0, con_sector._L2d - employed_sector2)
         
-        # Unemployment rate
+        # Distribute job openings across firms (simplified)
+        if cap_sector.firms:
+            openings_per_firm1 = cap_sector._JO1 // len(cap_sector.firms)
+            for firm in cap_sector.firms:
+                firm._JO1 = openings_per_firm1
+        
+        if con_sector.firms:
+            openings_per_firm2 = con_sector._JO2 // len(con_sector.firms)
+            for firm in con_sector.firms:
+                firm._JO2 = openings_per_firm2
+        
+        # Workers search for jobs (simple random matching for now)
+        unemployed_workers = [w for w in self.workers if w._employed == 0]
+        
+        # Match unemployed workers to sector 1 openings
+        hired_count1 = 0
+        for worker in unemployed_workers[:cap_sector._JO1]:
+            if cap_sector.firms:
+                # Assign to a random firm with openings
+                firm_idx = hired_count1 % len(cap_sector.firms)
+                firm = cap_sector.firms[firm_idx]
+                worker._employed = 1
+                worker._employer = firm
+                worker._Te = 0  # Reset tenure
+                worker._wReal = labor._wAvg  # Set wage
+                hired_count1 += 1
+        
+        # Match remaining unemployed to sector 2 openings
+        unemployed_workers = [w for w in self.workers if w._employed == 0]
+        hired_count2 = 0
+        for worker in unemployed_workers[:con_sector._JO2]:
+            if con_sector.firms:
+                # Assign to a random firm with openings
+                firm_idx = hired_count2 % len(con_sector.firms)
+                firm = con_sector.firms[firm_idx]
+                worker._employed = 2
+                worker._employer = firm
+                worker._Te = 0  # Reset tenure
+                worker._wReal = labor._wAvg  # Set wage
+                hired_count2 += 1
+        
+        # Update employment statistics
+        # Scale up actual employed workers to notional labor force
+        actual_employed = sum(1 for w in self.workers if w._employed > 0)
+        labor._L = actual_employed * labor._Lscale
+        
+        # Unemployment rate based on notional labor force
         labor._Ue = safe_divide(labor._Ls - labor._L, labor._Ls)
     
     def _production_and_pricing(self):
@@ -478,13 +563,38 @@ class Country(Agent):
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         
-        # Capital sector production
-        cap_sector._Q1e = cap_sector._Q1
+        # Update worker skills based on employment
+        for worker in self.workers:
+            if worker._employed > 0:
+                # Worker is employed - skills improve with tenure
+                worker._Te += 1
+                # Simple learning: skills improve slightly each period employed
+                worker._sT = min(worker._sT * 1.01, 2.0)  # Cap at 2x initial
+            else:
+                # Unemployed - skills deteriorate
+                worker._sT = max(worker._sT * 0.99, 0.5)  # Floor at 0.5x initial
+        
+        # Capital sector production based on actual employment
+        cap_sector._Q1e = 0.0
+        for firm in cap_sector.firms:
+            # Count workers in this firm
+            workers_in_firm = sum(1 for w in self.workers if w._employed == 1 and getattr(w, '_employer', None) == firm)
+            # Production based on workers and productivity
+            firm._Q1e = workers_in_firm * firm._Btau * cap_sector._m1 if firm._Btau > 0 else 0.0
+            cap_sector._Q1e += firm._Q1e
+            
         prices1 = [f._p1 for f in cap_sector.firms if f._p1 > 0]
         cap_sector._p1avg = sum(prices1) / len(prices1) if prices1 else INIPROD
         
-        # Consumption sector production
-        con_sector._Q2e = con_sector._Q2
+        # Consumption sector production based on actual employment
+        con_sector._Q2e = 0.0
+        for firm in con_sector.firms:
+            # Count workers in this firm
+            workers_in_firm = sum(1 for w in self.workers if w._employed == 2 and getattr(w, '_employer', None) == firm)
+            # Production based on workers and productivity
+            firm._Q2e = workers_in_firm * firm._A2 * con_sector._m2 if firm._A2 > 0 else 0.0
+            con_sector._Q2e += firm._Q2e
+            
         prices2 = [f._p2 for f in con_sector.firms if f._p2 > 0]
         con_sector._p2avg = sum(prices2) / len(prices2) if prices2 else INIPROD
     
@@ -493,28 +603,47 @@ class Country(Agent):
         # Government expenditure
         self._compute_government_expenditure()
         
-        # Desired consumption from workers
+        # Desired consumption from workers (using actual wages)
         labor = self.labor_market
-        self._Cd = labor._L * labor._wAvg  # Simplified: workers spend all wages
+        total_wages = sum(w._wReal for w in self.workers if w._employed > 0)
+        self._Cd = total_wages if total_wages > 0 else 0.0
         
         # Match with supply
         con_sector = self.consumption_sector
         supply = con_sector._Q2e * con_sector._p2avg
-        self._C = min(self._Cd, supply)
+        self._C = min(self._Cd + self._G, supply) if supply > 0 else 0.0
         con_sector._S2 = self._C
         
+        # Update firm sales (distribute proportionally)
+        if con_sector.firms and con_sector._Q2e > 0:
+            for firm in con_sector.firms:
+                firm_share = firm._Q2e / con_sector._Q2e if con_sector._Q2e > 0 else 0
+                firm._S2 = self._C * firm_share
+        
         # Forced savings
-        self._Sav = self._Cd - self._C
+        self._Sav = max(0, self._Cd - self._C)
         self._SavAcc += self._Sav
         
         # Inventories
-        con_sector._N = supply - self._C
+        con_sector._N = max(0, supply - self._C)
     
     def _financial_operations(self):
         """Financial operations: profits, taxes, dividends"""
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         fin_sector = self.financial_sector
+        labor = self.labor_market
+        
+        # Update average wage based on actual wages
+        total_wages = sum(w._wReal for w in self.workers if w._employed > 0)
+        employed = sum(1 for w in self.workers if w._employed > 0)
+        if employed > 0:
+            labor._wAvg = total_wages / employed
+            # Wage growth: small inflation + productivity gains
+            wage_growth = 1.0 + 0.01  # 1% baseline growth
+            for worker in self.workers:
+                if worker._employed > 0:
+                    worker._wReal *= wage_growth
         
         # Simplified profit calculation
         cap_sector._Pi1 = cap_sector._Q1e * cap_sector._p1avg * 0.1  # 10% margin
@@ -573,9 +702,19 @@ class Country(Agent):
             if gdp_prev and gdp_prev > 0:
                 self._dGDP = math.log(self._GDPreal) - math.log(gdp_prev)
         
+        # Inflation (price level change)
+        prev_price = self.read('_p2avg', lag=1) if self._t > 1 else con_sector._p2avg
+        if prev_price and prev_price > 0:
+            self._inflation = (con_sector._p2avg - prev_price) / prev_price
+        else:
+            self._inflation = 0.0
+        
         # Debt ratios
         self._DebGDP = safe_divide(self._Deb, self._GDPnom)
         self._DefPgdp = safe_divide(self._DefP, self._GDPnom)
+        
+        # Store price level for next period
+        self.write('_p2avg', con_sector._p2avg)
     
     def _compute_government_expenditure(self):
         """Compute government expenditure"""
@@ -618,7 +757,7 @@ class Country(Agent):
             Dictionary of time series data
         """
         # Initialize if not done
-        if self._t == 0:
+        if not hasattr(self, '_initialized') or not self._initialized:
             self.initialize()
         
         # Storage for results
@@ -641,7 +780,7 @@ class Country(Agent):
             results['GDPreal'].append(self._GDPreal)
             results['GDPnom'].append(self._GDPnom)
             results['Unemployment'].append(self.labor_market._Ue)
-            results['Inflation'].append(0.0)  # TBD
+            results['Inflation'].append(self._inflation)
             results['Debt'].append(self._Deb)
             results['Deficit'].append(self._Def)
         
