@@ -40,6 +40,7 @@ class Worker(Agent):
         self._Te = 0                      # Employment tenure in current firm
         self._Tu = 0                      # Periods unemployed
         self._w = 0.0                     # Current wage
+        self._wReal = 0.0                 # Real wage (w/CPI)
         self._wRes = 0.0                  # Reservation wage
         self._wR = 0.0                    # Requested wage
         self._s = INISKILL                # Compound skills
@@ -286,6 +287,25 @@ class Worker(Agent):
         
         self.write("_w", self._w)
         return self._w
+    
+    def compute_real_wage(self, CPI: float) -> float:
+        """
+        Compute real wage (_wReal equation)
+        
+        Real wage is nominal wage deflated by Consumer Price Index
+        
+        Args:
+            CPI: Consumer Price Index
+            
+        Returns:
+            Real wage
+        """
+        w = self.read("_w")
+        wReal = w / CPI if CPI > 0 else w
+        
+        self._wReal = wReal
+        self.write("_wReal", wReal)
+        return wReal
     
     def apply_for_jobs(self, omega: float, omega_u: float, 
                       flag_search_mode: int) -> int:

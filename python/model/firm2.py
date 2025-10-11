@@ -66,6 +66,7 @@ class Firm2(Agent):
         
         # Costs and pricing
         self._c2 = 0.0                    # Unit cost
+        self._c2e = 0.0                   # Effective unit cost
         self._p2 = 0.0                    # Price
         self._mu2 = 0.0                   # Mark-up
         
@@ -81,6 +82,7 @@ class Firm2(Agent):
         # Market
         self._f2 = 0.0                    # Market share
         self._age2 = 0                    # Firm age
+        self._l2 = 0.0                    # Unfilled demand
         
         # Supplier management
         self._supplier = None             # Current supplier (Firm1)
@@ -468,6 +470,50 @@ class Firm2(Agent):
         self.write("_c2", c2)
         self._c2 = c2
         return c2
+    
+    def compute_effective_unit_cost(self) -> float:
+        """
+        Compute effective average unit cost (_c2e equation)
+        
+        Effective average unit cost of firm in consumption-good sector.
+        Use expected cost if firm is not producing.
+        
+        Returns:
+            Effective unit cost
+        """
+        Q2e = self.read("_Q2e")
+        W2 = self.read("_W2")
+        c2 = self.read("_c2")
+        
+        # If producing, compute actual unit cost; otherwise use expected
+        c2e = safe_divide(W2, Q2e, c2)
+        
+        self.write("_c2e", c2e)
+        self._c2e = c2e
+        return c2e
+    
+    def compute_interest_from_deposits(self, rD: float) -> float:
+        """
+        Compute interest received from deposits (_iD2 equation)
+        
+        Interest received from deposits by firm in consumption-good sector
+        
+        Args:
+            rD: Deposit interest rate
+        
+        Returns:
+            Interest from deposits
+        """
+        NW2_lag = self.read("_NW2", 1)
+        iD2 = NW2_lag * rD
+        
+        self.write("_iD2", iD2)
+        self._iD2 = iD2 if hasattr(self, '_iD2') else 0.0
+        if not hasattr(self, '_iD2'):
+            self._iD2 = iD2
+        else:
+            self._iD2 = iD2
+        return iD2
     
     def compute_market_share(self, n2: int) -> float:
         """
