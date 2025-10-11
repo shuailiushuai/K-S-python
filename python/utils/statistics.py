@@ -187,6 +187,7 @@ class Statistics:
         Where:
         - Ireal = (SI + EI) / m2 * pK0 (investment in constant prices)
         - Creal = Q2e * pC0 (consumption in constant prices)
+        - SI, EI are the sum of machines delivered THIS period
         """
         # Get initial prices
         pC0 = model.params.get('pC0', 1.0)  # Initial consumption price
@@ -197,13 +198,19 @@ class Statistics:
         # Q2e is the sum of actual output across all Firm2
         real_consumption = sum(f.output for f in model.firms2) * pC0
         
-        # Real investment: delivered investment in real terms
-        # Convert monetary investment to real by dividing by pK0
-        total_delivered_investment = sum(
-            f.expansion_investment_delivered + f.replacement_investment_delivered
-            for f in model.firms2
-        )
-        real_investment = total_delivered_investment / pK0
+        # Real investment: machines delivered this period in real terms
+        # Following C++ Ireal = (SI + EI) / m2 * pK0
+        # We count machines from vintages born in current period
+        t = model.t
+        total_machines_delivered = 0.0
+        for firm in model.firms2:
+            for vintage in firm.vintages:
+                if vintage.birth_time == t:
+                    total_machines_delivered += vintage.machines
+        
+        # Convert to machine-period units and then to real value
+        real_investment = total_machines_delivered * m2 / m2 * pK0
+        # Simplifies to: total_machines_delivered * pK0
         
         return max(real_consumption + real_investment, 1.0)
     
@@ -217,20 +224,27 @@ class Statistics:
         Where:
         - C = S2 (nominal consumption - sales of Firm2)
         - Inom = SUM(_Inom) (nominal investment by Firm2)
-        - dNnom = SUM(_dNnom) (change in nominal inventories)
+        - dNnom = change in nominal inventories
+        
+        Note: _Inom = number of machines in newest vintage × price paid
         """
         # Nominal consumption (sales revenue of Firm2)
+        # C = sum of sales × price for each firm
         nominal_consumption = sum(f.sales * f.price for f in model.firms2)
         
-        # Nominal investment (value of delivered machines in monetary terms)
-        nominal_investment = sum(
-            f.expansion_investment_delivered + f.replacement_investment_delivered
-            for f in model.firms2
-        )
+        # Nominal investment: value of machines delivered THIS period
+        # Following C++ _Inom calculation:
+        # if ( cur != NULL && VS( cur, "__tVint" ) == T )
+        #     v[0] = VS( cur, "__nVint" ) * VS( cur, "__pVint" );
+        t = model.t
+        nominal_investment = 0.0
+        for firm in model.firms2:
+            for vintage in firm.vintages:
+                if vintage.birth_time == t:
+                    nominal_investment += vintage.machines * vintage.price
         
         # Change in nominal inventories
         # dN_nominal = new_inventories * price - old_inventories * old_price
-        # For simplicity, approximate as change in inventory value
         if hasattr(model, 'prev_inventory_value'):
             current_inventory_value = sum(f.inventories * f.price for f in model.firms2)
             d_inventories_nominal = current_inventory_value - model.prev_inventory_value

@@ -161,6 +161,7 @@ class CapitalMarket:
             # Reset delivered investment tracking for this period
             firm2.expansion_investment_delivered = 0.0
             firm2.replacement_investment_delivered = 0.0
+            firm2.nominal_investment = 0.0
             
             if not hasattr(firm2, 'pending_orders') or not firm2.pending_orders:
                 continue
@@ -179,14 +180,20 @@ class CapitalMarket:
                     # Deliver the minimum of what was ordered and what was produced
                     machines_delivered = min(machines_ordered, supplier.output)
                     
-                    # Calculate monetary value of delivered investment
-                    investment_value = machines_delivered * supplier.price
+                    # Track delivered investment by type (in machine units)
+                    # Following C++ model: _EI and _SI are in machine-period units
+                    # For m2=1, this equals number of machines delivered
+                    m2 = self.params.get('m2', 1.0)
+                    investment_units = machines_delivered * m2  # machine-period units
                     
-                    # Track delivered investment by type
                     if order_type == 'expansion':
-                        firm2.expansion_investment_delivered += investment_value
+                        firm2.expansion_investment_delivered += investment_units
                     else:
-                        firm2.replacement_investment_delivered += investment_value
+                        firm2.replacement_investment_delivered += investment_units
+                    
+                    # Also track nominal (monetary) investment for accounting
+                    # This is used for _Inom calculation (number of machines × price)
+                    firm2.nominal_investment += machines_delivered * supplier.price
                     
                     # Create new vintage with delivered machines
                     vintage_id = t * 10000 + supplier.firm_id
