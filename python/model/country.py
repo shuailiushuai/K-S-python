@@ -368,6 +368,132 @@ class FinancialSector(Agent):
         
         # Banks list
         self.banks: List[Bank] = []
+    
+    def compute_aggregates(self):
+        """
+        Compute financial sector aggregates from bank-level variables
+        Implements aggregation equations from fun_KS_financial.h
+        """
+        # Reset aggregates
+        self._PiB = 0.0
+        self._TaxB = 0.0
+        self._DivB = 0.0
+        self._BondsB = 0.0
+        self._Cl = 0
+        BadDeb = 0.0
+        BadDeb1 = 0.0
+        BadDeb2 = 0.0
+        Loans = 0.0
+        LoansCB = 0.0
+        Depo = 0.0
+        Res = 0.0
+        ExRes = 0.0
+        NWb = 0.0
+        
+        # Aggregate bank-level variables
+        for bank in self.banks:
+            self._PiB += getattr(bank, '_PiB', 0.0)
+            self._TaxB += getattr(bank, '_TaxB', 0.0)
+            self._DivB += getattr(bank, '_DivB', 0.0)
+            self._BondsB += getattr(bank, '_BondsB', 0.0)
+            self._Cl += getattr(bank, '_Cl', 0)
+            BadDeb1 += getattr(bank, '_BadDeb1', 0.0)
+            BadDeb2 += getattr(bank, '_BadDeb2', 0.0)
+            Loans += getattr(bank, '_Loans', 0.0)
+            LoansCB += getattr(bank, '_LoansCB', 0.0)
+            Depo += getattr(bank, '_Depo', 0.0)
+            Res += getattr(bank, '_Res', 0.0)
+            ExRes += getattr(bank, '_ExRes', 0.0)
+            NWb += getattr(bank, '_NWb', 0.0)
+        
+        # Store aggregates
+        self.write("BadDeb", BadDeb1 + BadDeb2)
+        self.write("BadDeb1", BadDeb1)
+        self.write("BadDeb2", BadDeb2)
+        self.write("Loans", Loans)
+        self.write("LoansCB", LoansCB)
+        self.write("Depo", Depo)
+        self.write("Res", Res)
+        self.write("ExRes", ExRes)
+        self.write("NWb", NWb)
+        
+        # Central bank profits (simplified: interest on bonds held by CB)
+        BondsCB = getattr(self, '_BondsCB', 0.0)
+        rBonds = getattr(self, '_rBonds', 0.02)
+        PiCB = BondsCB * rBonds
+        self._PiCB = PiCB
+        self.write("PiCB", PiCB)
+    
+    def compute_interest_rates(self):
+        """
+        Compute interest rate structure based on prime rate
+        Implements equations from fun_KS_financial.h
+        """
+        r = self._r  # Prime rate
+        
+        # Interest rate structure
+        self._rBonds = r + self._muBonds      # Bond rate
+        self._rD = r + self._muD              # Deposit rate
+        self._rDeb = r + self._muDeb          # Debt rate
+        self._rRes = r + self._muRes          # Reserve rate
+        
+        # Store rates
+        self.write("rBonds", self._rBonds)
+        self.write("rD", self._rD)
+        self.write("rDeb", self._rDeb)
+        self.write("rRes", self._rRes)
+    
+    def compute_prime_rate(self, CPI: float, U: float) -> float:
+        """
+        Compute prime interest rate using Taylor rule
+        r(t) = r* + phi_pi * (pi(t) - pi*) - phi_u * (u(t) - u*)
+        
+        Args:
+            CPI: Consumer price index
+            U: Unemployment rate
+        
+        Returns:
+            Prime interest rate
+        """
+        # Taylor rule parameters (can be configured)
+        r_star = getattr(self, '_rT', 0.03)    # Target rate
+        pi_star = getattr(self, '_piT', 0.02)   # Target inflation
+        u_star = getattr(self, '_uT', 0.05)     # Target unemployment
+        phi_pi = getattr(self, '_phiPi', 1.5)   # Inflation response
+        phi_u = getattr(self, '_phiU', 0.5)     # Unemployment response
+        
+        # Compute inflation rate
+        CPI_lag = self.read("_CPI", 1)
+        if CPI_lag > 0:
+            pi = (CPI - CPI_lag) / CPI_lag
+        else:
+            pi = 0.0
+        
+        # Taylor rule
+        r = r_star + phi_pi * (pi - pi_star) - phi_u * (U - u_star)
+        
+        # Bound interest rate (non-negative)
+        r = max(r, 0.0)
+        
+        self._r = r
+        self.write("r", r)
+        return r
+    
+    def compute_bond_supply(self, Def: float) -> float:
+        """
+        Compute government bond supply
+        
+        Args:
+            Def: Government deficit
+        
+        Returns:
+            Bond supply
+        """
+        # Government finances deficit through bond issuance
+        BS = max(Def, 0.0)  # Only positive deficit creates bond supply
+        
+        self.write("BS", BS)
+        return BS
 
 
 class Country(Agent):
@@ -1681,6 +1807,87 @@ class Country(Agent):
                 firm._credit_score = safe_divide(firm._NW2, firm._S2)
             else:
                 firm._credit_score = 0.0
+    
+    def regulatory_change(self):
+        """
+        Execute regulatory regime change at specified time (regChg equation)
+        
+        If TregChg is reached, changes labor market and policy parameters
+        from current values to "*Chg" variants.
+        
+        Implements EQUATION("regChg") from fun_KS_country.h
+        """
+        TregChg = int(self._TregChg)
+        
+        # Check if we're at regime change time
+        if self._t != TregChg or TregChg <= 0:
+            return False  # No change
+        
+        # Log regime change
+        print(f"\n>>> Regime change at t={self._t}")
+        
+        # Global parameter changes
+        if hasattr(self, '_flagSearchModeChg'):
+            self._flagSearchMode = self._flagSearchModeChg
+        if hasattr(self, '_flagIndexMinWageChg'):
+            self._flagIndexMinWage = self._flagIndexMinWageChg
+        if hasattr(self, '_flagHireSeqChg'):
+            self._flagHireSeq = self._flagHireSeqChg
+        if hasattr(self, '_flagHireOrder1Chg'):
+            self._flagHireOrder1 = self._flagHireOrder1Chg
+        if hasattr(self, '_flagFireOrder1Chg'):
+            self._flagFireOrder1 = self._flagFireOrder1Chg
+        if hasattr(self, '_trChg'):
+            self._tr = self._trChg
+        
+        # Financial sector changes
+        fin = self.financial_sector
+        if hasattr(fin, '_LambdaChg'):
+            fin._Lambda = fin._LambdaChg
+        if hasattr(fin, '_muResChg'):
+            fin._muRes = fin._muResChg
+        if hasattr(fin, '_tauBchg'):
+            fin._tauB = fin._tauBchg
+        if hasattr(fin, '_rTchg'):
+            fin._rT = fin._rTchg
+        
+        # Labor market changes
+        labor = self.labor_market
+        if hasattr(labor, '_TsChg'):
+            labor._Ts = labor._TsChg
+        if hasattr(labor, '_phiChg'):
+            labor._phi = labor._phiChg
+        if hasattr(labor, '_omegaPosChg'):
+            labor._omega = labor._omegaPosChg
+        
+        # Consumption sector changes
+        con = self.consumption_sector
+        if hasattr(con, '_e0Chg'):
+            con._e0 = con._e0Chg
+        if hasattr(con, '_mu20Chg'):
+            con._mu20 = con._mu20Chg
+        
+        # Firm-level changes (if flagAllFirmsChg is set)
+        if hasattr(self, '_flagAllFirmsChg') and self._flagAllFirmsChg == 1:
+            if hasattr(self, '_flagHireOrder2Chg'):
+                self._flagHireOrder2 = self._flagHireOrder2Chg
+            if hasattr(self, '_flagFireOrder2Chg'):
+                self._flagFireOrder2 = self._flagFireOrder2Chg
+            if hasattr(self, '_flagFireRuleChg'):
+                self._flagFireRule = self._flagFireRuleChg
+            if hasattr(self, '_flagWageOfferChg'):
+                self._flagWageOffer = self._flagWageOfferChg
+            if hasattr(self, '_flagIndexWageChg'):
+                self._flagIndexWage = self._flagIndexWageChg
+            if hasattr(con, '_bChg'):
+                con._b = con._bChg
+            
+            # Mark all firms as post-change
+            for firm in con.firms:
+                if hasattr(firm, '_postChg'):
+                    firm._postChg = 1
+        
+        return True  # Change executed
     
     def simulate(self, periods: int) -> Dict:
         """
