@@ -66,8 +66,11 @@ class Firm2:
         self.investment_desired = 0.0
         self.expansion_investment = 0.0
         self.replacement_investment = 0.0
-        self.expansion_investment_delivered = 0.0  # Actual delivered
-        self.replacement_investment_delivered = 0.0  # Actual delivered
+        # Delivered investment in NUMBER of machines (not monetary value)
+        self.expansion_investment_delivered = 0.0  # In machine units
+        self.replacement_investment_delivered = 0.0  # In machine units
+        # Nominal investment value for accounting (monetary)
+        self.nominal_investment = 0.0
         
         # Market variables
         self.market_share = 1.0 / params.get('F20', 100)

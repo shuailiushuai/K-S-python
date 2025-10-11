@@ -557,6 +557,10 @@ class KSModel:
         # 15. Calculate macroeconomic aggregates
         self._calculate_aggregates(t)
         
+        # Store sectoral average wages for next period
+        # Used by Firm1 pricing (needs w1avg from previous period)
+        self._store_sectoral_wages()
+        
         # 16. Entry and exit of firms
         self._handle_entry_exit(t)
         
@@ -576,6 +580,31 @@ class KSModel:
         """Calculate and store aggregate economic variables"""
         # These calculations are used by the statistics module
         pass
+    
+    def _store_sectoral_wages(self):
+        """
+        Store sectoral average wages for use in next period
+        
+        Following C++ model, Firm1 pricing uses w1avg from previous period.
+        """
+        # Calculate sector 1 average wage
+        sector1_workers = [w for w in self.workers if w.employed and w.employer in self.firms1]
+        if sector1_workers:
+            w1avg = sum(w.wage for w in sector1_workers) / len(sector1_workers)
+        else:
+            w1avg = self.params.get('w0min', 1.0)
+        
+        # Store current as "previous" for next period
+        self.params.set('w1avg_prev', w1avg)
+        
+        # Calculate sector 2 average wage (if needed in future)
+        sector2_workers = [w for w in self.workers if w.employed and w.employer in self.firms2]
+        if sector2_workers:
+            w2avg = sum(w.wage for w in sector2_workers) / len(sector2_workers)
+        else:
+            w2avg = self.params.get('w0min', 1.0)
+        
+        self.params.set('w2avg_prev', w2avg)
     
     def _handle_entry_exit(self, t: int):
         """Handle firm entry and exit in both sectors"""
@@ -719,6 +748,24 @@ class KSModel:
                     entry_time=t
                 )
                 firm.machine_productivity = machine_prod
+                
+                # Initialize entrant pricing and costs (critical fix!)
+                # Entrants should have similar productivity and pricing to incumbents
+                if self.firms1:
+                    # Use average labor productivity from incumbents
+                    avg_btau = sum(f.labor_productivity_output for f in self.firms1) / len(self.firms1)
+                    firm.labor_productivity_output = avg_btau * (0.8 + 0.4 * np.random.random())
+                else:
+                    firm.labor_productivity_output = self.params.get('Btau0', 0.052)
+                
+                # Calculate proper cost and price following C++ model
+                w1avg_prev = self.params.get('w1avg_prev', self.params.get('w0min', 1.0))
+                m1 = self.params.get('m1', 1.0)
+                mu1 = self.params.get('mu1', 0.04)
+                
+                firm.unit_cost = w1avg_prev / (firm.labor_productivity_output * m1)
+                firm.price = (1 + mu1) * firm.unit_cost
+                
                 self.firms1.append(firm)
                 self.entry_firms1 += 1
         

@@ -264,17 +264,31 @@ class Firm1:
     def set_price(self, t: int):
         """
         Set machine price using cost-plus markup
+        
+        Following C++ model (_c1 and _p1 equations, fun_KS_firm1.h lines 332-345):
+        - _c1 = w1avg(t-1) / (_Btau * m1)
+        - _p1 = (1 + mu1) * _c1
+        
+        Unit cost is based on labor productivity, not actual output.
+        Uses sectoral average wage from PREVIOUS period.
         """
         mu1 = self.params.get('mu1', 0.04)  # Markup
         m1 = self.params.get('m1', 1.0)
         
-        # Calculate unit cost
-        if self.output > 0:
-            self.unit_cost = self.wage_bill / self.output
+        # Get sectoral average wage from previous period
+        # In C++ this is VLS( PARENT, "w1avg", 1 )
+        w1avg_prev = self.params.get('w1avg_prev', self.params.get('w0min', 1.0))
+        
+        # Calculate unit cost based on labor productivity
+        # _c1 = w1avg(t-1) / (_Btau * m1)
+        if self.labor_productivity_output > 0:
+            self.unit_cost = w1avg_prev / (self.labor_productivity_output * m1)
         else:
-            self.unit_cost = self.avg_wage / m1
+            # Fallback for initialization
+            self.unit_cost = w1avg_prev / m1
         
         # Set price with markup
+        # _p1 = (1 + mu1) * _c1
         self.price = (1 + mu1) * self.unit_cost
     
     def calculate_profit(self, t: int):
