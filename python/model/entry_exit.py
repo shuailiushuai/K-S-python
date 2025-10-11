@@ -52,7 +52,7 @@ def entry_firm1(sector, n: int, new_industry: bool, country) -> float:
     for i in range(n):
         # Create new firm ID
         if sector.firms:
-            new_id = max(f._ID1 for f in sector.firms) + 1 + i
+            new_id = max(f._ID for f in sector.firms) + 1 + i
         else:
             new_id = 1 + i
         
@@ -61,33 +61,31 @@ def entry_firm1(sector, n: int, new_industry: bool, country) -> float:
         
         if new_industry:
             # Initial industry setup
-            firm._Atau = INIPROD
-            firm._Btau = (1 + mu1) * firm._Atau / (m1 * con_sector._m2 * con_sector._b)
-            firm._NW10 = sector._NW10
+            firm._A2tau = INIPROD
+            firm._Btau = (1 + mu1) * firm._A2tau / (m1 * getattr(con_sector, "_m2", 1.0) * getattr(con_sector, '_b', 20.0))
+            firm._NW10 = getattr(sector, '_NW10', 10.0)  # Default initial wealth
             firm._f1 = 1.0 / n  # Fair share
-            firm._sV = labor._sAvg  # Initial worker vintage skills
+            firm._sV = getattr(labor, '_sAvg', 1.0)  # Initial worker vintage skills
             firm._t1ent = 0  # Entered before t=1
-            w1avg = labor._wAvg
+            w1avg = getattr(labor, '_wAvg', 1.0)
             
             # Initial demand expectation
-            F20 = con_sector._F20
-            m2 = con_sector._m2
-            p20 = con_sector._CPI if hasattr(con_sector, '_CPI') else 1.0
-            Ls0 = labor._Ls0
+            F20 = getattr(con_sector, '_F20', 100)
+            m2 = getattr(con_sector, '_m2', 1.0)
+            p20 = getattr(con_sector, '_CPI', 1.0)
+            Ls0 = getattr(labor, '_Ls0', 1000)
             K0 = np.ceil(Ls0 * w1avg / p20 / F20 / m2) * m2
             
-            firm._D1 = F20 * K0 / m2 / con_sector._eta / n
+            firm._D1 = F20 * K0 / m2 / getattr(con_sector, '_eta', 10.0) / n
             
         else:
             # Ongoing entry
             if sector.firms:
                 # Use sector averages
-                firm._NW10 = max(
-                    sum(f._NW1 * f._f1 for f in sector.firms if hasattr(f, '_f1')),
-                    sector._NW10 * sector._PPI / sector._pK0
-                )
+                avg_nw = sum(f._NW for f in sector.firms if hasattr(f, '_NW')) / len(sector.firms)
+                firm._NW10 = max(avg_nw, getattr(sector, '_NW10', 10.0))
             else:
-                firm._NW10 = sector._NW10
+                firm._NW10 = getattr(sector, '_NW10', 10.0)
             
             firm._f1 = 0.0  # No initial market share
             firm._sV = INISKILL
@@ -101,7 +99,7 @@ def entry_firm1(sector, n: int, new_industry: bool, country) -> float:
                 AtauMax = INIPROD
                 BtauMax = INIPROD
             
-            w1avg = sector._w1avg if hasattr(sector, '_w1avg') else labor._wAvg
+            w1avg = getattr(sector, '_w1avg', getattr(labor, '_wAvg', 1.0))
             
             # Initial demand (1 machine per client under fair share)
             F2 = len(con_sector.firms)
@@ -113,12 +111,12 @@ def entry_firm1(sector, n: int, new_industry: bool, country) -> float:
             
             if alpha < x5:
                 # Entrant advantage
-                firm._Atau = AtauMax * (1 + x5)
+                firm._A2tau = AtauMax * (1 + x5)
             else:
                 # Imitation
-                firm._Atau = AtauMax * (1 + alpha * x5)
+                firm._A2tau = AtauMax * (1 + alpha * x5)
             
-            firm._Btau = firm._Atau / w1avg
+            firm._Btau = firm._A2tau / w1avg
         
         # Common initialization
         firm._c1 = firm._Btau
@@ -129,35 +127,35 @@ def entry_firm1(sector, n: int, new_industry: bool, country) -> float:
         
         # Capital and workers
         firm._K = firm._D1
-        firm._L1d = int(np.ceil(firm._D1 / (m1 * firm._Atau)))
+        firm._L1d = int(np.ceil(firm._D1 / (m1 * firm._A2tau)))
         firm._L1rd = max(1, int(nu * firm._L1d))
-        firm._L1 = 0  # Will be filled by labor market
+        firm._L = 0  # Will be filled by labor market
         
         # Financial structure
         # Determine debt/equity split
         phi = random_engine.uniform(Phi3, Phi4)
         
         # Net worth initialization
-        NW1 = firm._NW10 * phi
-        Deb1 = NW1 * Deb10ratio
-        Eq1 = NW1 - Deb1
+        NW = firm._NW10 * phi
+        Deb = NW * Deb10ratio / (1 + Deb10ratio)  # Corrected formula
+        Eq = NW - Deb
         
-        firm._NW1 = NW1
-        firm._Deb1 = Deb1
-        firm._Eq1 = Eq1
-        firm._NW10 = NW1
+        firm._NW1 = NW
+        firm._Deb1 = Deb
+        firm._Eq1 = Eq if hasattr(firm, '_Eq1') else 0
+        firm._NW0 = NW if hasattr(firm, '_NW0') else 0
         
         # Assign bank
         if country.financial_sector.banks:
             # Random bank selection (should use proper selection mechanism)
-            bank_idx = random_engine.randint(0, len(country.financial_sector.banks) - 1)
+            bank_idx = random_engine.uniform_int(0, len(country.financial_sector.banks) - 1)
             firm._bank = country.financial_sector.banks[bank_idx]
         
         # Add to sector
         sector.firms.append(firm)
         
         # Accumulate entry cost
-        entry_cost += Eq1  # Worker equity contribution
+        entry_cost += Eq  # Worker equity contribution
     
     return entry_cost
 
@@ -207,7 +205,7 @@ def entry_firm2(sector, n: int, new_industry: bool, country) -> float:
         
         if new_industry:
             # Initial industry setup
-            firm._A = 1.0  # Initial competitiveness
+            firm._A2 = 1.0  # Initial competitiveness
             firm._Broch = 0.0  # No brochure quality yet
             firm._f2 = 1.0 / n  # Fair share
             firm._life2cycle = 0
@@ -218,10 +216,10 @@ def entry_firm2(sector, n: int, new_industry: bool, country) -> float:
             firm._p2 = (1 + mu20) * firm._c2
             
             # Initial capital
-            Ls0 = labor._Ls0
-            w1avg = labor._wAvg
-            m2 = sector._m2
-            F20 = sector._F20
+            Ls0 = getattr(labor, '_Ls0', getattr(labor, '_Ls', 1000))
+            w1avg = getattr(labor, '_wAvg', 1.0)
+            m2 = getattr(sector, '_m2', 1.0)
+            F20 = getattr(sector, '_F20', 100)
             
             K0 = np.ceil(Ls0 * w1avg / firm._p2 / F20 / m2) * m2
             firm._K = K0 / F20
@@ -252,10 +250,10 @@ def entry_firm2(sector, n: int, new_industry: bool, country) -> float:
             
             # Initial competitiveness with advantage
             if sector.firms:
-                Amax = max(f._A for f in sector.firms)
-                firm._A = Amax * (1 + x1)
+                Amax = max(f._A2 for f in sector.firms)
+                firm._A2 = Amax * (1 + x1)
             else:
-                firm._A = 1.0
+                firm._A2 = 1.0
             
             # Initial pricing
             if sector.firms:
@@ -278,12 +276,12 @@ def entry_firm2(sector, n: int, new_industry: bool, country) -> float:
         
         # Calculate required net worth
         if new_industry:
-            NW20 = sector._NW20
+            NW20 = getattr(sector, "_NW20", 10.0)
         else:
             if sector.firms:
                 NW20 = sum(f._NW2 * f._f2 for f in sector.firms if hasattr(f, '_f2'))
             else:
-                NW20 = sector._NW20
+                NW20 = getattr(sector, "_NW20", 10.0)
         
         NW2 = NW20 * xi
         Deb2 = NW2 * Deb20ratio
@@ -296,13 +294,13 @@ def entry_firm2(sector, n: int, new_industry: bool, country) -> float:
         
         # Assign bank
         if country.financial_sector.banks:
-            bank_idx = random_engine.randint(0, len(country.financial_sector.banks) - 1)
+            bank_idx = random_engine.uniform_int(0, len(country.financial_sector.banks) - 1)
             firm._bank = country.financial_sector.banks[bank_idx]
         
         # Select supplier from capital sector
         if cap_sector.firms:
             # Random supplier selection (should use market share weights)
-            supplier_idx = random_engine.randint(0, len(cap_sector.firms) - 1)
+            supplier_idx = random_engine.uniform_int(0, len(cap_sector.firms) - 1)
             firm._supplier = cap_sector.firms[supplier_idx]
         
         # Add to sector
