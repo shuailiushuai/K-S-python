@@ -389,6 +389,60 @@ class Firm1(Agent):
         self._Pi1 = Pi1
         return Pi1
     
+    def compute_tax_and_cash_flow(self, tr: float) -> float:
+        """
+        Compute taxes and handle cash flow (_Tax1 equation)
+        
+        Implements the C++ _Tax1 equation which:
+        1. Computes tax on profits
+        2. Calls cash_flow() to manage financial operations
+        3. Updates _NW1, _Deb1, _CD1, _CD1c, _CS1
+        
+        Args:
+            tr: Tax rate
+            
+        Returns:
+            Tax paid
+        """
+        from .support import cash_flow
+        
+        Pi1 = self.read("_Pi1")
+        
+        # Tax on profits only (no tax on losses)
+        if Pi1 > 0:
+            Tax1 = Pi1 * tr
+        else:
+            Tax1 = 0.0
+        
+        # Manage cash flow (updates deposits, debt, bankruptcy detection)
+        cash_flow(self, Pi1, Tax1)
+        
+        self.write("_Tax1", Tax1)
+        self._Tax1 = Tax1
+        return Tax1
+    
+    def compute_dividends(self, d1: float) -> float:
+        """
+        Compute dividends (_Div1 equation)
+        
+        Dividends to pay by firm in capital-good sector
+        Formula: _Div1 = max(d1 * (_Pi1 - _Tax1), 0)
+        
+        Args:
+            d1: Dividend payout rate
+            
+        Returns:
+            Dividends to be paid
+        """
+        Pi1 = self.read("_Pi1")
+        Tax1 = self.read("_Tax1")
+        
+        Div1 = max(d1 * (Pi1 - Tax1), 0.0)
+        
+        self.write("_Div1", Div1)
+        self._Div1 = Div1
+        return Div1
+    
     def compute_price(self, mu1: float) -> float:
         """
         Compute machine price

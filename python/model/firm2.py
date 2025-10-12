@@ -680,6 +680,61 @@ class Firm2(Agent):
         self._Pi2 = Pi2
         return Pi2
     
+    def compute_tax_and_cash_flow(self, tr: float) -> float:
+        """
+        Compute taxes and handle cash flow (_Tax2 equation)
+        
+        Implements the C++ _Tax2 equation which:
+        1. Computes tax on profits
+        2. Calls cash_flow() to manage financial operations
+        3. Updates _NW2, _Deb2, _CD2, _CD2c, _CS2
+        
+        Args:
+            tr: Tax rate
+            
+        Returns:
+            Tax paid
+        """
+        from .support import cash_flow
+        
+        Pi2 = self.read("_Pi2")
+        
+        # Tax on profits only (no tax on losses)
+        if Pi2 > 0:
+            Tax2 = Pi2 * tr
+        else:
+            Tax2 = 0.0
+        
+        # Manage cash flow (updates deposits, debt, bankruptcy detection)
+        cash_flow(self, Pi2, Tax2)
+        
+        self.write("_Tax2", Tax2)
+        self._Tax2 = Tax2
+        return Tax2
+    
+    def compute_dividends(self, d2: float) -> float:
+        """
+        Compute dividends (_Div2 equation)
+        
+        Dividends to pay by firm in consumption-good sector
+        Formula: _Div2 = max(d2 * (_Pi2 - _Tax2 - _Bon2), 0)
+        
+        Args:
+            d2: Dividend payout rate
+            
+        Returns:
+            Dividends to be paid
+        """
+        Pi2 = self.read("_Pi2")
+        Tax2 = self.read("_Tax2")
+        Bon2 = self.read("_Bon2", 0)  # Worker bonus
+        
+        Div2 = max(d2 * (Pi2 - Tax2 - Bon2), 0.0)
+        
+        self.write("_Div2", Div2)
+        self._Div2 = Div2
+        return Div2
+    
     def initialize(self, params: dict):
         """
         Initialize firm with parameters
