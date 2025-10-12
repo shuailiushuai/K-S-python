@@ -78,6 +78,9 @@ class Firm2(Agent):
         self._Tax2 = 0.0                  # Taxes paid
         self._Div2 = 0.0                  # Dividends paid
         self._Bon2 = 0.0                  # Worker bonus
+        self._W2 = 0.0                    # Total wages paid
+        self._i2 = 0.0                    # Interest paid on debt
+        self._iD2 = 0.0                   # Interest from deposits
         
         # Market
         self._f2 = 0.0                    # Market share
@@ -597,6 +600,85 @@ class Firm2(Agent):
             return True
         
         return False
+    
+    def compute_total_wages(self) -> float:
+        """
+        Compute total wages paid by firm (_W2 equation)
+        
+        Total wages paid by firm in sector 2
+        Sum of all wages paid to employed workers
+        
+        Returns:
+            Total wages paid
+        """
+        # In a full implementation, this would sum wages from all Wrk2 worker objects
+        # For now, use approximation: _L2 * _w2avg
+        L2 = self.read("_L2")
+        w2avg = self.read("_w2avg")
+        
+        W2 = L2 * w2avg
+        
+        self.write("_W2", W2)
+        self._W2 = W2
+        return W2
+    
+    def compute_interest_on_debt(self, rDeb: float, kConst: float) -> float:
+        """
+        Compute interest paid on debt (_i2 equation)
+        
+        Interest paid by firm in consumption-good sector
+        Based on lagged debt, interest rate, and credit class premium
+        
+        Args:
+            rDeb: Base debt interest rate
+            kConst: Credit class premium constant
+        
+        Returns:
+            Interest paid on debt
+        """
+        Deb2_lag = self.read("_Deb2", 1)
+        try:
+            qc2_lag = self.read("_qc2", 1)
+        except:
+            qc2_lag = 1.0
+        
+        # Interest = debt * (base rate + credit class premium)
+        i2 = Deb2_lag * rDeb * (1 + (qc2_lag - 1) * kConst)
+        
+        self.write("_i2", i2)
+        self._i2 = i2 if hasattr(self, '_i2') else 0.0
+        if not hasattr(self, '_i2'):
+            self._i2 = i2
+        else:
+            self._i2 = i2
+        return i2
+    
+    def compute_profits(self) -> float:
+        """
+        Compute profits before taxes (_Pi2 equation)
+        
+        Profit of firm (before taxes) in consumption-good sector
+        Formula: _Pi2 = _S2 + _iD2 - _W2 - _i2
+        
+        Returns:
+            Profits before taxes
+        """
+        S2 = self.read("_S2")
+        try:
+            iD2 = self.read("_iD2")
+        except:
+            iD2 = 0.0
+        W2 = self.read("_W2")
+        try:
+            i2 = self.read("_i2")
+        except:
+            i2 = 0.0
+        
+        Pi2 = S2 + iD2 - W2 - i2
+        
+        self.write("_Pi2", Pi2)
+        self._Pi2 = Pi2
+        return Pi2
     
     def initialize(self, params: dict):
         """
