@@ -431,6 +431,7 @@ class ConsumptionSector(Agent):
         
         while remaining_demand > 0.01:  # Small threshold to avoid floating point issues
             prev_remaining = remaining_demand
+            current_remaining = remaining_demand  # Copy for this iteration
             unallocated_shares = 0.0  # Shares yet unallocated
             
             # Process each firm
@@ -438,7 +439,8 @@ class ConsumptionSector(Agent):
                 if f2[j] > 0:  # Firm has demand to supply
                     if sup2[j] > 0:  # Product to supply?
                         # Firm's $ demand allocation based on market share
-                        firm_demand_nominal = remaining_demand * f2[j]
+                        # IMPORTANT: Use current_remaining (fixed at loop start), not remaining_demand
+                        firm_demand_nominal = current_remaining * f2[j]
                         # Convert to real units
                         firm_demand_real = firm_demand_nominal / p2[j] if p2[j] > 0 else 0
                         
