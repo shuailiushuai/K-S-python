@@ -1428,8 +1428,26 @@ class Country(Agent):
         # Aggregate sector-level profits
         con_sector._Pi2 = sum(f._Pi2 for f in con_sector.firms)
         
-        # Simplified profit calculation for capital sector (TODO: implement properly)
-        cap_sector._Pi1 = cap_sector._Q1e * cap_sector._p1avg * 0.1  # 10% margin
+        # Compute firm-level financial variables for capital sector
+        # This matches the C++ equation sequence: _S1 -> _W1 -> _i1 -> _iD1 -> _Pi1
+        for firm in cap_sector.firms:
+            # Compute sales revenue (_S1)
+            firm.compute_sales_revenue()
+            
+            # Compute total wages (_W1)
+            firm.compute_total_wages()
+            
+            # Compute interest on debt (_i1)
+            firm.compute_interest_on_debt(rDeb, kConst)
+            
+            # Compute interest from deposits (_iD1)
+            firm.compute_interest_from_deposits(rD)
+            
+            # Compute profits (_Pi1)
+            firm.compute_profits()
+        
+        # Aggregate sector-level profits
+        cap_sector._Pi1 = sum(f._Pi1 for f in cap_sector.firms)
         
         # Compute financial sector profits and aggregates
         self._compute_financial_aggregates()
