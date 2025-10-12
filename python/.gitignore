@@ -46,3 +46,4 @@ results/
 # OS
 .DS_Store
 Thumbs.db
+analysis_output/
