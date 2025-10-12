@@ -1522,18 +1522,32 @@ class Country(Agent):
         fin._BadDeb = BadDeb1 + BadDeb2
         
         # Depo equation - total deposits
-        Depo = 0.0
-        for bank in fin.banks:
-            if hasattr(bank, '_Depo'):
-                Depo += bank._Depo
+        # In C++, deposits are computed per bank from client firms
+        # Here we compute total deposits directly from all firm net worths
+        Depo = cap_sector._NW1 + con_sector._NW2
+        # Add worker savings if available
+        if hasattr(self, '_SavAcc'):
+            Depo += self._SavAcc
         fin._Depo = Depo
         
+        # Update bank deposits proportionally if banks exist
+        if fin.banks:
+            for bank in fin.banks:
+                # Each bank gets equal share for simplicity
+                # (In full implementation, would use market shares)
+                bank._Depo = Depo / len(fin.banks)
+                bank.write("_Depo", bank._Depo, 0)
+        
         # Loans equation - total loans
-        Loans = 0.0
-        for bank in fin.banks:
-            if hasattr(bank, '_Loans'):
-                Loans += bank._Loans
+        # Compute from firm debts
+        Loans = cap_sector._Deb1 + con_sector._Deb2
         fin._Loans = Loans
+        
+        # Update bank loans proportionally if banks exist
+        if fin.banks:
+            for bank in fin.banks:
+                bank._Loans = Loans / len(fin.banks)
+                bank.write("_Loans", bank._Loans, 0)
         
         # NWb equation - total bank net worth
         NWb = 0.0

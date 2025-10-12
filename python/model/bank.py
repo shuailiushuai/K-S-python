@@ -346,6 +346,35 @@ class Bank(Agent):
         self._iDb = iDb
         return iDb
     
+    def compute_deposits(self, SavAcc: float, fD: float) -> float:
+        """
+        Compute total bank deposits (_Depo equation)
+        
+        Implements C++ _Depo equation from fun_KS_bank.h
+        Bank deposits are sum of:
+        1. Worker deposits (fraction fD of SavAcc)
+        2. Firm1 net worth (_NW1) for each client in Cli1
+        3. Firm2 net worth (_NW2) for each client in Cli2
+        
+        Args:
+            SavAcc: Total household savings account
+            fD: Bank's deposit share (market share)
+        
+        Returns:
+            Total deposits
+        """
+        # Worker deposits
+        Depo = fD * SavAcc
+        
+        # Firm deposits from clients
+        # In Python, we need to access client firms through the bank's children
+        # or through a client list maintained by the bank
+        # For now, we'll compute this at the financial sector level
+        
+        self.write("_Depo", Depo)
+        self._Depo = Depo
+        return Depo
+    
     def compute_profits(self) -> float:
         """
         Compute bank profits
