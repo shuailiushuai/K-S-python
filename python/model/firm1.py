@@ -64,6 +64,9 @@ class Firm1(Agent):
         self._Pi1 = 0.0                   # Gross profits
         self._Tax1 = 0.0                  # Taxes paid
         self._Div1 = 0.0                  # Dividends paid
+        self._W1 = 0.0                    # Total wages paid
+        self._i1 = 0.0                    # Interest paid on debt
+        self._iD1 = 0.0                   # Interest from deposits
         
         # Market
         self._f1 = 0.0                    # Market share
@@ -264,6 +267,127 @@ class Firm1(Agent):
         self.write("_RD", rd)
         self._RD = rd
         return rd
+    
+    def compute_sales_revenue(self) -> float:
+        """
+        Compute sales revenue (_S1 equation)
+        
+        Sales of firm in capital-good sector
+        Formula: _S1 = _p1 * _Q1e
+        
+        Returns:
+            Sales revenue
+        """
+        p1 = self.read("_p1")
+        Q1e = self.read("_Q1e")
+        S1 = p1 * Q1e
+        
+        self.write("_S1", S1)
+        self._S1 = S1
+        return S1
+    
+    def compute_total_wages(self) -> float:
+        """
+        Compute total wages paid (_W1 equation)
+        
+        Total wages paid by firm in capital-good sector
+        Uses approximation: _W1 = _L1 * w1avg
+        
+        Returns:
+            Total wages paid
+        """
+        L1 = self.read("_L1")
+        try:
+            w1avg = self.parent.read("w1avg")
+        except:
+            w1avg = INIWAGE
+        
+        W1 = L1 * w1avg
+        
+        self.write("_W1", W1)
+        self._W1 = W1
+        return W1
+    
+    def compute_interest_on_debt(self, rDeb: float, kConst: float) -> float:
+        """
+        Compute interest paid on debt (_i1 equation)
+        
+        Interest paid by firm in capital-good sector
+        Formula: _i1 = _Deb1(lag) * rDeb * (1 + (qc1(lag) - 1) * kConst)
+        
+        Args:
+            rDeb: Base debt interest rate
+            kConst: Credit class premium constant
+        
+        Returns:
+            Interest paid on debt
+        """
+        Deb1_lag = self.read("_Deb1", 1)
+        try:
+            qc1_lag = self.read("_qc1", 1)
+        except:
+            qc1_lag = 1.0
+        
+        i1 = Deb1_lag * rDeb * (1 + (qc1_lag - 1) * kConst)
+        
+        self.write("_i1", i1)
+        self._i1 = i1 if hasattr(self, '_i1') else 0.0
+        if not hasattr(self, '_i1'):
+            self._i1 = i1
+        else:
+            self._i1 = i1
+        return i1
+    
+    def compute_interest_from_deposits(self, rD: float) -> float:
+        """
+        Compute interest received from deposits (_iD1 equation)
+        
+        Interest received from deposits by firm in capital-good sector
+        Formula: _iD1 = _NW1(lag) * rD
+        
+        Args:
+            rD: Deposit interest rate
+        
+        Returns:
+            Interest from deposits
+        """
+        NW1_lag = self.read("_NW1", 1)
+        iD1 = NW1_lag * rD
+        
+        self.write("_iD1", iD1)
+        self._iD1 = iD1 if hasattr(self, '_iD1') else 0.0
+        if not hasattr(self, '_iD1'):
+            self._iD1 = iD1
+        else:
+            self._iD1 = iD1
+        return iD1
+    
+    def compute_profits(self) -> float:
+        """
+        Compute profits before taxes (_Pi1 equation)
+        
+        Profit (before taxes) of firm in capital-good sector
+        Formula: _Pi1 = _S1 + _iD1 - _W1 - _i1
+        
+        Returns:
+            Profits before taxes
+        """
+        S1 = self.read("_S1")
+        try:
+            iD1 = self.read("_iD1")
+        except:
+            iD1 = 0.0
+        W1 = self.read("_W1")
+        try:
+            i1 = self.read("_i1")
+        except:
+            i1 = 0.0
+        
+        Pi1 = S1 + iD1 - W1 - i1
+        
+        self.write("_Pi1", Pi1)
+        self._Pi1 = Pi1
+        return Pi1
     
     def compute_price(self, mu1: float) -> float:
         """
