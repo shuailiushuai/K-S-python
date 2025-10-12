@@ -445,7 +445,6 @@ class ConsumptionSector(Agent):
                         if firm_demand_real <= sup2[j]:  # Can supply all demanded?
                             # Supply all demanded
                             firm_refs[j]._D2 += firm_demand_real
-                            firm_refs[j]._S2 = firm_refs[j]._D2 * p2[j]  # Sales revenue
                             
                             total_fulfilled += firm_demand_real
                             remaining_demand -= firm_demand_nominal
@@ -459,7 +458,6 @@ class ConsumptionSector(Agent):
                             
                             # Supply all available
                             firm_refs[j]._D2 += sup2[j]
-                            firm_refs[j]._S2 = firm_refs[j]._D2 * p2[j]  # Sales revenue
                             
                             total_fulfilled += sup2[j]
                             remaining_demand -= sup2[j] * p2[j]
@@ -1315,6 +1313,11 @@ class Country(Agent):
         # Allocate demand to firms using full D2 algorithm (from fun_KS_consumption.h)
         total_demand_fulfilled = con_sector.allocate_demand_to_firms(total_demand_nominal)
         
+        # Compute sales revenue (_S2) for each firm AFTER allocation completes
+        # This matches the C++ equation: _S2 = _p2 * _D2
+        for firm in con_sector.firms:
+            firm._S2 = firm._p2 * firm._D2
+        
         # Actual consumption (in real terms)
         self._C = total_demand_fulfilled * con_sector._p2avg
         
@@ -1401,9 +1404,30 @@ class Country(Agent):
         # Total wages paid
         labor._W = total_wages * labor._Lscale  # Scale up to notional labor force
         
-        # Simplified profit calculation
+        # Compute firm-level financial variables for consumption sector
+        # This matches the C++ equation sequence: _W2 -> _i2 -> _iD2 -> _Pi2
+        rDeb = fin_sector._rDeb if hasattr(fin_sector, '_rDeb') else 0.03
+        rD = fin_sector._rD if hasattr(fin_sector, '_rD') else 0.01
+        kConst = fin_sector._kConst if hasattr(fin_sector, '_kConst') else 0.5
+        
+        for firm in con_sector.firms:
+            # Compute total wages (_W2)
+            firm.compute_total_wages()
+            
+            # Compute interest on debt (_i2)
+            firm.compute_interest_on_debt(rDeb, kConst)
+            
+            # Compute interest from deposits (_iD2)
+            firm.compute_interest_from_deposits(rD)
+            
+            # Compute profits (_Pi2)
+            firm.compute_profits()
+        
+        # Aggregate sector-level profits
+        con_sector._Pi2 = sum(f._Pi2 for f in con_sector.firms)
+        
+        # Simplified profit calculation for capital sector (TODO: implement properly)
         cap_sector._Pi1 = cap_sector._Q1e * cap_sector._p1avg * 0.1  # 10% margin
-        con_sector._Pi2 = con_sector._S2 * 0.1
         
         # Compute financial sector profits and aggregates
         self._compute_financial_aggregates()
