@@ -1452,22 +1452,45 @@ class Country(Agent):
         # Compute financial sector profits and aggregates
         self._compute_financial_aggregates()
         
-        # Taxes
-        cap_sector._Tax1 = max(0, cap_sector._Pi1 * self._tr) if self._flagTax else 0
-        con_sector._Tax2 = max(0, con_sector._Pi2 * self._tr) if self._flagTax else 0
+        # Compute firm-level taxes and handle cash flow
+        # This matches C++ _Tax1 and _Tax2 equations
+        tr = self._tr if self._flagTax else 0.0
+        
+        # Capital sector firms
+        for firm in cap_sector.firms:
+            firm.compute_tax_and_cash_flow(tr)
+        
+        # Consumption sector firms
+        for firm in con_sector.firms:
+            firm.compute_tax_and_cash_flow(tr)
+        
+        # Aggregate sector-level taxes
+        cap_sector._Tax1 = sum(f._Tax1 for f in cap_sector.firms)
+        con_sector._Tax2 = sum(f._Tax2 for f in con_sector.firms)
         fin_sector._TaxB = max(0, fin_sector._PiB * self._tr) if self._flagTax else 0
         
         self._Tax = cap_sector._Tax1 + con_sector._Tax2 + fin_sector._TaxB
         
-        # Dividends
-        cap_sector._Div1 = max(0, cap_sector._Pi1 - cap_sector._Tax1) * 0.5
-        con_sector._Div2 = max(0, con_sector._Pi2 - con_sector._Tax2) * 0.5
+        # Compute firm-level dividends (after taxes)
+        # Use 0.5 (50%) payout rate as default
+        d1 = 0.5  # Dividend payout rate for sector 1
+        d2 = 0.5  # Dividend payout rate for sector 2
+        
+        for firm in cap_sector.firms:
+            firm.compute_dividends(d1)
+        
+        for firm in con_sector.firms:
+            firm.compute_dividends(d2)
+        
+        # Aggregate sector-level dividends
+        cap_sector._Div1 = sum(f._Div1 for f in cap_sector.firms)
+        con_sector._Div2 = sum(f._Div2 for f in con_sector.firms)
         fin_sector._DivB = max(0, fin_sector._PiB - fin_sector._TaxB) * 0.5
         
         self._Div = cap_sector._Div1 + con_sector._Div2 + fin_sector._DivB
         self._TaxDiv = self._Div * self._tr if self._flagTax >= 2 else 0
         
-        # Net worth updates (simplified)
+        # Net worth updates (now handled by cash_flow, but still aggregate for consistency)
         cap_sector._NW1 = sum(f._NW1 for f in cap_sector.firms)
         con_sector._NW2 = sum(f._NW2 for f in con_sector.firms)
     
@@ -1499,18 +1522,32 @@ class Country(Agent):
         fin._BadDeb = BadDeb1 + BadDeb2
         
         # Depo equation - total deposits
-        Depo = 0.0
-        for bank in fin.banks:
-            if hasattr(bank, '_Depo'):
-                Depo += bank._Depo
+        # In C++, deposits are computed per bank from client firms
+        # Here we compute total deposits directly from all firm net worths
+        Depo = cap_sector._NW1 + con_sector._NW2
+        # Add worker savings if available
+        if hasattr(self, '_SavAcc'):
+            Depo += self._SavAcc
         fin._Depo = Depo
         
+        # Update bank deposits proportionally if banks exist
+        if fin.banks:
+            for bank in fin.banks:
+                # Each bank gets equal share for simplicity
+                # (In full implementation, would use market shares)
+                bank._Depo = Depo / len(fin.banks)
+                bank.write("_Depo", bank._Depo, 0)
+        
         # Loans equation - total loans
-        Loans = 0.0
-        for bank in fin.banks:
-            if hasattr(bank, '_Loans'):
-                Loans += bank._Loans
+        # Compute from firm debts
+        Loans = cap_sector._Deb1 + con_sector._Deb2
         fin._Loans = Loans
+        
+        # Update bank loans proportionally if banks exist
+        if fin.banks:
+            for bank in fin.banks:
+                bank._Loans = Loans / len(fin.banks)
+                bank.write("_Loans", bank._Loans, 0)
         
         # NWb equation - total bank net worth
         NWb = 0.0
