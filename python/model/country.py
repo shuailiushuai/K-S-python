@@ -380,6 +380,115 @@ class ConsumptionSector(Agent):
         self._MC2 = math.log(max(NW2_lag, 0) + 1) - math.log(Deb2_lag + 1)
         self.write("MC2", self._MC2)
         return self._MC2
+    
+    def allocate_demand_to_firms(self, nominal_demand: float) -> float:
+        """
+        Allocate demand to firms based on market share and available supply
+        Implements the full D2 allocation algorithm from fun_KS_consumption.h
+        
+        This algorithm cycles through firms allocating demand proportionally
+        to market share until all demand is fulfilled or no more supply exists.
+        It tracks unfilled demand (_l2) for each firm.
+        
+        Args:
+            nominal_demand: Total nominal demand (Cd + G)
+        
+        Returns:
+            Total real demand fulfilled (in units, not monetary)
+        """
+        k = len(self.firms)  # Number of firms
+        
+        if k == 0:
+            return 0.0
+        
+        # Create temporary vectors for shares, prices, supply, and firm objects
+        f2 = []  # Market shares
+        p2 = []  # Prices
+        sup2 = []  # Available supply (Q2e + inventory from last period)
+        firm_refs = []  # Firm references
+        
+        # Initialize vectors and reset firm demand accumulators
+        for firm in self.firms:
+            # Get firm's available supply (current production + last period inventory)
+            Q2e = getattr(firm, '_Q2e', 0.0)
+            N_lag = firm.read('_N', 1)
+            supply = Q2e + N_lag
+            
+            sup2.append(supply)
+            f2.append(getattr(firm, '_f2', 0.0))  # Market share
+            p2.append(getattr(firm, '_p2', 1.0))  # Price
+            firm_refs.append(firm)
+            
+            # Reset demand fulfilled accumulator
+            firm._D2 = 0.0
+            # Assume no unsatisfied demand initially
+            firm._l2 = 0.0
+        
+        # Cycle through firms until all demand is allocated or no more product to sell
+        total_fulfilled = 0.0  # Fulfilled demand accumulator (in real units)
+        remaining_demand = nominal_demand  # Remaining unallocated $ demand
+        iteration = 0
+        
+        while remaining_demand > 0.01:  # Small threshold to avoid floating point issues
+            prev_remaining = remaining_demand
+            unallocated_shares = 0.0  # Shares yet unallocated
+            
+            # Process each firm
+            for j in range(k):
+                if f2[j] > 0:  # Firm has demand to supply
+                    if sup2[j] > 0:  # Product to supply?
+                        # Firm's $ demand allocation based on market share
+                        firm_demand_nominal = remaining_demand * f2[j]
+                        # Convert to real units
+                        firm_demand_real = firm_demand_nominal / p2[j] if p2[j] > 0 else 0
+                        
+                        if firm_demand_real <= sup2[j]:  # Can supply all demanded?
+                            # Supply all demanded
+                            firm_refs[j]._D2 += firm_demand_real
+                            firm_refs[j]._S2 = firm_refs[j]._D2 * p2[j]  # Sales revenue
+                            
+                            total_fulfilled += firm_demand_real
+                            remaining_demand -= firm_demand_nominal
+                            unallocated_shares += f2[j]
+                            sup2[j] -= firm_demand_real  # Make supplied units unavailable
+                        else:
+                            # Cannot supply all demanded - supply all available
+                            # Track unsatisfied demand on first iteration only
+                            if iteration == 0:
+                                firm_refs[j]._l2 = firm_demand_real - sup2[j]
+                            
+                            # Supply all available
+                            firm_refs[j]._D2 += sup2[j]
+                            firm_refs[j]._S2 = firm_refs[j]._D2 * p2[j]  # Sales revenue
+                            
+                            total_fulfilled += sup2[j]
+                            remaining_demand -= sup2[j] * p2[j]
+                            # Nothing else to supply from this firm
+                            f2[j] = 0.0
+                            sup2[j] = 0.0
+                    else:
+                        # No product to supply
+                        f2[j] = 0.0
+            
+            # Rescale remaining firms' market shares
+            if unallocated_shares > 0:
+                for j in range(k):
+                    f2[j] /= unallocated_shares
+            else:
+                # No more firms with supply
+                break
+            
+            # Check if we made progress
+            if abs(remaining_demand - prev_remaining) < 0.001:
+                # No significant progress, exit to avoid infinite loop
+                break
+            
+            iteration += 1
+            # Safety check to prevent infinite loops
+            if iteration > 1000:
+                break
+        
+        return total_fulfilled
 
 
 class FinancialSector(Agent):
@@ -1199,27 +1308,30 @@ class Country(Agent):
         # Compute desired consumption (Cd equation from fun_KS_country.h)
         self._compute_desired_consumption()
         
-        # Match with supply
+        # Full D2 demand allocation algorithm with unfilled demand tracking
         con_sector = self.consumption_sector
-        supply = con_sector._Q2e * con_sector._p2avg
-        self._C = min(self._Cd + self._G, supply) if supply > 0 else 0.0
-        con_sector._S2 = self._C
+        total_demand_nominal = self._Cd + self._G  # Nominal demand
         
-        # Update firm sales (distribute proportionally)
-        if con_sector.firms and con_sector._Q2e > 0:
-            for firm in con_sector.firms:
-                firm_share = firm._Q2e / con_sector._Q2e if con_sector._Q2e > 0 else 0
-                firm._S2 = self._C * firm_share
+        # Allocate demand to firms using full D2 algorithm (from fun_KS_consumption.h)
+        total_demand_fulfilled = con_sector.allocate_demand_to_firms(total_demand_nominal)
+        
+        # Actual consumption (in real terms)
+        self._C = total_demand_fulfilled * con_sector._p2avg
         
         # Forced savings (Sav equation)
-        self._Sav = max(0, self._Cd + self._G - self._C)
+        self._Sav = max(0, total_demand_nominal - self._C)
         
         # Update accumulated savings (SavAcc equation)
         # Note: SavAcc is adjusted in Cd equation based on flagCons
         self._SavAcc += self._Sav
         
+        # Update sector-level sales and inventories
+        con_sector._S2 = sum(firm._S2 for firm in con_sector.firms)
+        con_sector._D2 = total_demand_fulfilled
+        
         # Inventories
-        con_sector._N = max(0, supply - self._C)
+        total_supply = sum(firm._Q2e + getattr(firm, '_N', 0) for firm in con_sector.firms)
+        con_sector._N = max(0, total_supply - total_demand_fulfilled)
         con_sector._dNnom = con_sector._N - self.read_sector('_N', con_sector, lag=1) if self._t > 1 else 0
     
     def _compute_desired_consumption(self):
