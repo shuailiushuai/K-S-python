@@ -10,6 +10,7 @@ for K+S model simulation results, including:
 - Sector-specific analysis
 - Worker analysis
 - Sensitivity analysis
+- Skill mismatch analysis (NEW)
 
 Based on the original R scripts:
 - KS-aggregates.R
@@ -21,6 +22,9 @@ Based on the original R scripts:
 - KS-workers.R
 - KS-elementary-effects-SA.R
 - KS-kriging-sobol-SA.R
+
+Extended with:
+- Skill mismatch analysis
 """
 
 from .support_functions import *
@@ -30,6 +34,7 @@ from .box_plots import *
 from .sector_analysis import *
 from .worker_analysis import *
 from .sensitivity_analysis import *
+from .skill_mismatch_analysis import *
 
 __all__ = [
     'load_simulation_results',
@@ -41,5 +46,7 @@ __all__ = [
     'analyze_sector_2_pool',
     'analyze_workers',
     'elementary_effects_sa',
-    'kriging_sobol_sa'
+    'kriging_sobol_sa',
+    'analyze_skill_mismatch',
+    'SkillMismatchAnalyzer'
 ]
