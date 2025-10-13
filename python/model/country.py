@@ -1306,7 +1306,9 @@ class Country(Agent):
             firm._L1 = workers_in_firm * Lscale
             
             # Production based on workers and productivity
-            firm._Q1e = workers_in_firm * firm._Btau * cap_sector._m1 if firm._Btau > 0 else 0.0
+            # CRITICAL: Scale production by Lscale to match C++ model (__Qvint equation)
+            # Each worker object represents Lscale real workers, so production must be scaled
+            firm._Q1e = workers_in_firm * firm._Btau * cap_sector._m1 * Lscale if firm._Btau > 0 else 0.0
             cap_sector._Q1e += firm._Q1e
         
         # Sector L1 = total workers in sector 1 * Lscale (L1 equation from fun_KS_capital.h)
@@ -1334,7 +1336,9 @@ class Country(Agent):
             firm.write("_w2avg", firm._w2avg)  # Write to lag storage
             
             # Production based on workers and productivity
-            firm._Q2e = workers_in_firm * firm._A2 * con_sector._m2 if firm._A2 > 0 else 0.0
+            # CRITICAL: Scale production by Lscale to match C++ model (__Qvint equation)
+            # Each worker object represents Lscale real workers, so production must be scaled
+            firm._Q2e = workers_in_firm * firm._A2 * con_sector._m2 * Lscale if firm._A2 > 0 else 0.0
             con_sector._Q2e += firm._Q2e
             
         prices2 = [f._p2 for f in con_sector.firms if f._p2 > 0]
