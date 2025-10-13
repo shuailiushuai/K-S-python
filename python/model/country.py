@@ -1214,13 +1214,22 @@ class Country(Agent):
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         
-        # Count currently employed workers in each sector
+        # Count currently employed workers in each sector (actual agents)
         employed_sector1 = sum(1 for w in self.workers if w._employed == 1)
         employed_sector2 = sum(1 for w in self.workers if w._employed == 2)
         
         # Calculate job openings needed
-        cap_sector._JO1 = max(0, cap_sector._L1d - employed_sector1)
-        con_sector._JO2 = max(0, con_sector._L2d - employed_sector2)
+        # NOTE: L1d and L2d are in NOTIONAL units, employed counts are ACTUAL units
+        # Convert employed to notional by scaling up, then compute openings in notional units
+        employed_sector1_notional = employed_sector1 * labor._Lscale
+        employed_sector2_notional = employed_sector2 * labor._Lscale
+        
+        cap_sector._JO1 = max(0, cap_sector._L1d - employed_sector1_notional)
+        con_sector._JO2 = max(0, con_sector._L2d - employed_sector2_notional)
+        
+        # Convert job openings from notional to actual units for matching
+        actual_JO1 = cap_sector._JO1 // labor._Lscale
+        actual_JO2 = con_sector._JO2 // labor._Lscale
         
         # Distribute job openings across firms (simplified)
         if cap_sector.firms:
@@ -1236,9 +1245,9 @@ class Country(Agent):
         # Workers search for jobs (simple random matching for now)
         unemployed_workers = [w for w in self.workers if w._employed == 0]
         
-        # Match unemployed workers to sector 1 openings
+        # Match unemployed workers to sector 1 openings (use actual units)
         hired_count1 = 0
-        for worker in unemployed_workers[:cap_sector._JO1]:
+        for worker in unemployed_workers[:actual_JO1]:
             if cap_sector.firms:
                 # Assign to a random firm with openings
                 firm_idx = hired_count1 % len(cap_sector.firms)
@@ -1249,10 +1258,10 @@ class Country(Agent):
                 worker._wReal = labor._wAvg  # Set wage
                 hired_count1 += 1
         
-        # Match remaining unemployed to sector 2 openings
+        # Match remaining unemployed to sector 2 openings (use actual units)
         unemployed_workers = [w for w in self.workers if w._employed == 0]
         hired_count2 = 0
-        for worker in unemployed_workers[:con_sector._JO2]:
+        for worker in unemployed_workers[:actual_JO2]:
             if con_sector.firms:
                 # Assign to a random firm with openings
                 firm_idx = hired_count2 % len(con_sector.firms)
@@ -1862,6 +1871,12 @@ class Country(Agent):
         """
         labor = self.labor_market
         fin = self.financial_sector
+        
+        # First, compute wU (unemployment benefit wage)
+        # wU equation: Unemployment benefit = phi * wAvg from previous period
+        phi = getattr(self, '_phi', 0.5)  # Benefit replacement rate
+        wAvg_lag = self.read_sector('_wAvg', labor, lag=1, default=labor._wAvg)
+        labor._wU = phi * wAvg_lag
         
         i = int(self._flagGovExp)  # Type of govt. expenditure
         j = int(self._flagFiscalRule)  # Fiscal rule to apply
