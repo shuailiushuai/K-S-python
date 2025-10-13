@@ -1872,6 +1872,12 @@ class Country(Agent):
         labor = self.labor_market
         fin = self.financial_sector
         
+        # First, compute wU (unemployment benefit wage)
+        # wU equation: Unemployment benefit = phi * wAvg from previous period
+        phi = getattr(self, '_phi', 0.5)  # Benefit replacement rate
+        wAvg_lag = self.read_sector('_wAvg', labor, lag=1, default=labor._wAvg)
+        labor._wU = phi * wAvg_lag
+        
         i = int(self._flagGovExp)  # Type of govt. expenditure
         j = int(self._flagFiscalRule)  # Fiscal rule to apply
         
