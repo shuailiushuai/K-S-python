@@ -1298,14 +1298,20 @@ class Country(Agent):
         
         # Capital sector production based on actual employment
         cap_sector._Q1e = 0.0
+        Lscale = self.labor_market._Lscale
         for firm in cap_sector.firms:
             # Count workers in this firm
             workers_in_firm = sum(1 for w in self.workers if w._employed == 1 and getattr(w, '_employer', None) == firm)
-            firm._L1 = workers_in_firm  # Update firm's worker count
+            # CRITICAL: Firm _L1 must be scaled to match C model (COUNT("Wrk1") * Lscale)
+            firm._L1 = workers_in_firm * Lscale
             
             # Production based on workers and productivity
             firm._Q1e = workers_in_firm * firm._Btau * cap_sector._m1 if firm._Btau > 0 else 0.0
             cap_sector._Q1e += firm._Q1e
+        
+        # Sector L1 = total workers in sector 1 * Lscale (L1 equation from fun_KS_capital.h)
+        total_workers_sector1 = sum(1 for w in self.workers if w._employed == 1)
+        cap_sector._L1 = total_workers_sector1 * Lscale
             
         prices1 = [f._p1 for f in cap_sector.firms if f._p1 > 0]
         cap_sector._p1avg = sum(prices1) / len(prices1) if prices1 else INIPROD
@@ -1315,8 +1321,9 @@ class Country(Agent):
         for firm in con_sector.firms:
             # Count workers in this firm
             workers_in_firm = sum(1 for w in self.workers if w._employed == 2 and getattr(w, '_employer', None) == firm)
-            firm._L2 = workers_in_firm  # Update firm's worker count
-            firm.write("_L2", workers_in_firm)  # Write to lag storage
+            # CRITICAL: Firm _L2 must be scaled to match C model (COUNT("Wrk2") * Lscale)
+            firm._L2 = workers_in_firm * Lscale
+            firm.write("_L2", firm._L2)  # Write to lag storage
             
             # Compute average wage for this firm's workers
             if workers_in_firm > 0:
