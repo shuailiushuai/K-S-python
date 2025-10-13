@@ -106,9 +106,12 @@ def test_firm_labor_count_tracked():
     Test Bug Fix #3: Firm labor count tracked
     
     Validates that:
-    - Firm._L2 equals actual number of workers in firm
+    - Firm._L2 equals (actual number of workers in firm) * Lscale
     - Firm wage costs (W2) are calculated correctly
     - Firm profits (Pi2) are non-zero
+    
+    NOTE: According to C++ model (fun_KS_firm2.h line 936):
+          _L2 = COUNT("Wrk2") * Lscale
     """
     print("\n" + "="*70)
     print("TEST 3: Firm Labor Count Tracked")
@@ -122,20 +125,25 @@ def test_firm_labor_count_tracked():
     
     # Check first consumption firm
     firm = country.consumption_sector.firms[0]
+    Lscale = country.labor_market._Lscale
     
     # Count actual workers
     actual_workers = sum(1 for w in country.workers 
                         if w._employed == 2 and getattr(w, '_employer', None) == firm)
     
     print(f"Actual workers in firm: {actual_workers}")
+    print(f"Lscale: {Lscale}")
     print(f"Firm._L2 (tracked): {firm._L2}")
+    print(f"Expected _L2 (workers * Lscale): {actual_workers * Lscale}")
     print(f"Firm._w2avg: ${firm._w2avg:.2f}")
     print(f"Firm._W2 (wage costs): ${getattr(firm, '_W2', 0):.2f}")
     print(f"Firm._S2 (sales): ${firm._S2:.2f}")
     print(f"Firm._Pi2 (profit): ${getattr(firm, '_Pi2', 0):.2f}")
     
     # Assertions
-    assert firm._L2 == actual_workers, f"FAIL: Firm._L2 should equal actual workers"
+    # _L2 should be scaled according to C++ model: COUNT("Wrk2") * Lscale
+    expected_L2 = actual_workers * Lscale
+    assert abs(firm._L2 - expected_L2) < 0.01, f"FAIL: Firm._L2 should equal actual_workers * Lscale"
     assert firm._L2 > 0, "FAIL: Firm should have workers"
     
     W2 = getattr(firm, '_W2', 0)
@@ -145,7 +153,7 @@ def test_firm_labor_count_tracked():
     Pi2 = getattr(firm, '_Pi2', 0)
     assert Pi2 != 0, "FAIL: Profit should be non-zero"
     
-    print("✓ PASS: Firm labor tracked, wages computed correctly")
+    print("✓ PASS: Firm labor tracked correctly (scaled), wages computed correctly")
     return True
 
 

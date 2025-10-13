@@ -9,16 +9,29 @@ Based on Nikiforos & Zezza 2017 approach
 
 import sys
 from pathlib import Path
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from model.country import Country
+from model.random_engine import random_engine
 from config import get_default_config
 
 # Threshold for SFC detection (same as C++)
 SFCTHRD = 1e-4
 TOL = 0.1
+
+
+@pytest.fixture
+def country():
+    """Fixture that provides an initialized Country instance with one time step"""
+    config = get_default_config()
+    c = Country(config)
+    random_engine.seed(42)
+    c.initialize()
+    c.time_step()
+    return c
 
 
 def test_sfc_balance_sheet(country: Country) -> dict:
