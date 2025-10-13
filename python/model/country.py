@@ -842,6 +842,9 @@ class Country(Agent):
         sector = self.consumption_sector
         F20 = int(sector._F20)
         
+        # Initial equal market share for each firm
+        initial_market_share = 1.0 / F20 if F20 > 0 else 0.0
+        
         # Create initial firms
         for i in range(F20):
             firm = Firm2(firm_id=i+1, parent=sector)
@@ -856,6 +859,8 @@ class Country(Agent):
             firm._S2 = 0.0  # Sales
             firm._L2d = 0  # Labor demand
             firm._JO2 = 0  # Job openings
+            firm._f2 = initial_market_share  # CRITICAL: Initialize market share
+            firm._N = 0.0  # Initial inventory
             sector.firms.append(firm)
     
     def _initialize_financial_sector(self):
@@ -923,18 +928,21 @@ class Country(Agent):
         Execute one complete time step
         Follows the equation sequencing from fun_KS.cpp::timeStep
         
-        Exact sequence:
+        CRITICAL SEQUENCING: Wages must be computed BEFORE consumption demand!
+        
+        Correct sequence based on C++ implementation:
         1. Regime change (if scheduled)
         2. Central bank updates interest rates (r, rDeb, rBonds)
         3. Consumption sector plans (D2e, Q2, L2d, Id)
         4. Capital sector plans (D1, Q1, L1d)
         5. Labor market matching (appl, JO1, JO2, L)
         6. Production and pricing (Q1e, Q2e, p1avg, p2avg)
-        7. Consumption and sales (G, D2d, D2, N, Sav)
-        8. Financial operations (Pi1, Pi2, PiB, Tax1, Tax2, TaxB, NW1, NW2)
-        9. Government operations (Tax, Def, Deb)
-        10. Aggregates (GDPreal, GDPnom)
-        11. Entry/exit (entryExit)
+        7. Wage computation (W, wAvg) - MUST BE BEFORE consumption demand
+        8. Consumption and sales (G, Cd, D2d, D2, N, Sav)
+        9. Financial operations (Pi1, Pi2, PiB, Tax1, Tax2, TaxB, NW1, NW2)
+        10. Government operations (Tax, Def, Deb)
+        11. Aggregates (GDPreal, GDPnom)
+        12. Entry/exit (entryExit)
         """
         # Increment time
         self._t += 1
@@ -957,19 +965,22 @@ class Country(Agent):
         # 5. Production and pricing
         self._production_and_pricing()
         
-        # 6. Government expenditure and consumption/sales
+        # 6. Compute wages (CRITICAL: must be before consumption demand)
+        self._compute_wages()
+        
+        # 7. Government expenditure and consumption/sales
         self._consumption_and_sales()
         
-        # 7. Financial operations: profits, taxes, cash flows
+        # 8. Financial operations: profits, taxes, cash flows
         self._financial_operations()
         
-        # 8. Government operations: taxes, deficit, debt
+        # 9. Government operations: taxes, deficit, debt
         self._government_operations()
         
-        # 9. Compute aggregate statistics
+        # 10. Compute aggregate statistics
         self._compute_aggregates()
         
-        # 10. Entry and exit
+        # 11. Entry and exit
         self._entry_exit()
         
         # Update statistics collector
@@ -1281,6 +1292,8 @@ class Country(Agent):
         for firm in cap_sector.firms:
             # Count workers in this firm
             workers_in_firm = sum(1 for w in self.workers if w._employed == 1 and getattr(w, '_employer', None) == firm)
+            firm._L1 = workers_in_firm  # Update firm's worker count
+            
             # Production based on workers and productivity
             firm._Q1e = workers_in_firm * firm._Btau * cap_sector._m1 if firm._Btau > 0 else 0.0
             cap_sector._Q1e += firm._Q1e
@@ -1293,12 +1306,53 @@ class Country(Agent):
         for firm in con_sector.firms:
             # Count workers in this firm
             workers_in_firm = sum(1 for w in self.workers if w._employed == 2 and getattr(w, '_employer', None) == firm)
+            firm._L2 = workers_in_firm  # Update firm's worker count
+            firm.write("_L2", workers_in_firm)  # Write to lag storage
+            
+            # Compute average wage for this firm's workers
+            if workers_in_firm > 0:
+                firm_worker_wages = [w._wReal for w in self.workers if w._employed == 2 and getattr(w, '_employer', None) == firm]
+                firm._w2avg = sum(firm_worker_wages) / len(firm_worker_wages)
+            else:
+                firm._w2avg = self.labor_market._wAvg
+            firm.write("_w2avg", firm._w2avg)  # Write to lag storage
+            
             # Production based on workers and productivity
             firm._Q2e = workers_in_firm * firm._A2 * con_sector._m2 if firm._A2 > 0 else 0.0
             con_sector._Q2e += firm._Q2e
             
         prices2 = [f._p2 for f in con_sector.firms if f._p2 > 0]
         con_sector._p2avg = sum(prices2) / len(prices2) if prices2 else INIPROD
+    
+    def _compute_wages(self):
+        """
+        Compute total wages paid to workers (W equation)
+        
+        CRITICAL: This must be called BEFORE consumption demand calculation,
+        since Cd depends on W (wages paid).
+        
+        Implements the W equation from fun_KS_labor.h
+        """
+        labor = self.labor_market
+        
+        # Compute average wage based on actual wages
+        total_wages = sum(w._wReal for w in self.workers if w._employed > 0)
+        employed = sum(1 for w in self.workers if w._employed > 0)
+        
+        if employed > 0:
+            # Average wage across all employed workers
+            labor._wAvg = total_wages / employed
+            
+            # Small wage growth each period: inflation + productivity
+            # This provides dynamics to wage levels over time
+            wage_growth = 1.0 + 0.01  # 1% baseline growth per period
+            for worker in self.workers:
+                if worker._employed > 0:
+                    worker._wReal *= wage_growth
+        
+        # Total wages paid (W equation)
+        # Scale up from actual workers to notional labor force
+        labor._W = total_wages * labor._Lscale
     
     def _consumption_and_sales(self):
         """Match consumption demand with supply"""
@@ -1319,6 +1373,7 @@ class Country(Agent):
         # This matches the C++ equation: _S2 = _p2 * _D2
         for firm in con_sector.firms:
             firm._S2 = firm._p2 * firm._D2
+            firm.write("_S2", firm._S2)  # Write to lag storage for profit calculation
         
         # Actual consumption (in real terms)
         self._C = total_demand_fulfilled * con_sector._p2avg
@@ -1386,25 +1441,14 @@ class Country(Agent):
         """
         Financial operations: profits, taxes, dividends
         Includes aggregate financial statistics
+        
+        NOTE: Wages (W, wAvg) are now computed in _compute_wages() which is
+        called before this method, so they are available here.
         """
         cap_sector = self.capital_sector
         con_sector = self.consumption_sector
         fin_sector = self.financial_sector
         labor = self.labor_market
-        
-        # Update average wage based on actual wages
-        total_wages = sum(w._wReal for w in self.workers if w._employed > 0)
-        employed = sum(1 for w in self.workers if w._employed > 0)
-        if employed > 0:
-            labor._wAvg = total_wages / employed
-            # Wage growth: small inflation + productivity gains
-            wage_growth = 1.0 + 0.01  # 1% baseline growth
-            for worker in self.workers:
-                if worker._employed > 0:
-                    worker._wReal *= wage_growth
-        
-        # Total wages paid
-        labor._W = total_wages * labor._Lscale  # Scale up to notional labor force
         
         # Compute firm-level financial variables for consumption sector
         # This matches the C++ equation sequence: _W2 -> _i2 -> _iD2 -> _Pi2
