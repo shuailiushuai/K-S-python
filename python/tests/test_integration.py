@@ -5,6 +5,7 @@ Tests the complete simulation workflow
 
 import sys
 from pathlib import Path
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -12,6 +13,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from model.country import Country
 from model.random_engine import random_engine
 from config import get_default_config
+
+
+@pytest.fixture
+def country():
+    """Fixture that provides an initialized Country instance"""
+    config = get_default_config()
+    c = Country(config)
+    random_engine.seed(42)
+    c.initialize()
+    return c
 
 
 def test_initialization():
@@ -35,8 +46,7 @@ def test_initialization():
     print(f"    Banks: {len(country.financial_sector.banks)}")
     print(f"    Workers: {len(country.workers)}")
     print()
-    
-    return country
+
 
 
 def test_single_timestep(country):
