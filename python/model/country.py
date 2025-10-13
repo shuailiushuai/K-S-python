@@ -1683,10 +1683,18 @@ class Country(Agent):
         fin._BondsCB = max(0, BondsCB_current * (1 - 1/thetaBonds) + fin._BS - fin._BD)
         
         # PiCB equation - central bank profits
-        # Interest on bonds held + reserves - interest on deposits
-        rBonds = fin._rBonds
-        rRes = fin._rRes
-        PiCB = fin._BondsCB * rBonds - fin._DepoG * rRes
+        # PiCB = r[t-1] * LoansCB[t-1] + rBonds[t-1] * BondsCB[t-1] - rRes[t-1] * (Res[t-1] + DepoG[t-1])
+        r_lag = self.read_sector('_r', fin, lag=1, default=0)
+        rBonds_lag = self.read_sector('_rBonds', fin, lag=1, default=0)
+        rRes_lag = self.read_sector('_rRes', fin, lag=1, default=0)
+        LoansCB_lag = self.read_sector('_LoansCB', fin, lag=1, default=0)
+        BondsCB_lag = self.read_sector('_BondsCB', fin, lag=1, default=0)
+        Res_lag = self.read_sector('_Res', fin, lag=1, default=0)
+        DepoG_lag = self.read_sector('_DepoG', fin, lag=1, default=0)
+        
+        PiCB = (r_lag * LoansCB_lag + 
+                rBonds_lag * BondsCB_lag - 
+                rRes_lag * (Res_lag + DepoG_lag))
         fin._PiCB = PiCB
     
     def _government_operations(self):
@@ -1715,14 +1723,22 @@ class Country(Agent):
         self._DefP = self._G - self._Tax
         
         # Total deficit (Def equation)
-        # Primary deficit plus interest payments on public debt
-        rBonds = fin._rBonds if hasattr(fin, '_rBonds') else fin._r
-        interest_payment = self._Deb * rBonds
-        self._Def = self._DefP + interest_payment
+        # Def = DefP - PiCB + Gbail + rBonds[t-1] * (BondsB[t-1] + BondsCB[t-1]) - rRes[t-1] * DepoG[t-1]
+        rBonds_lag = self.read_sector('_rBonds', fin, lag=1, default=0)
+        rRes_lag = self.read_sector('_rRes', fin, lag=1, default=0)
+        BondsB_lag = self.read_sector('_BondsB', fin, lag=1, default=0)
+        BondsCB_lag = self.read_sector('_BondsCB', fin, lag=1, default=0)
+        DepoG_lag = self.read_sector('_DepoG', fin, lag=1, default=0)
+        PiCB = getattr(fin, '_PiCB', 0)
+        Gbail_lag = self.read_sector('_Gbail', fin, lag=1, default=0)
         
-        # Update public debt (Deb equation)
-        # Debt increases by deficit amount
-        self._Deb += self._Def
+        self._Def = (self._DefP - PiCB + Gbail_lag + 
+                     rBonds_lag * (BondsB_lag + BondsCB_lag) - 
+                     rRes_lag * DepoG_lag)
+        
+        # Government debt (Deb equation)
+        # Deb = BondsB + BondsCB (total bonds outstanding)
+        self._Deb = fin._BondsB + fin._BondsCB
     
     def read_sector(self, attr: str, sector, lag: int = 0, default=0):
         """
