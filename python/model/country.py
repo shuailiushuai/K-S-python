@@ -1292,6 +1292,8 @@ class Country(Agent):
         for firm in cap_sector.firms:
             # Count workers in this firm
             workers_in_firm = sum(1 for w in self.workers if w._employed == 1 and getattr(w, '_employer', None) == firm)
+            firm._L1 = workers_in_firm  # Update firm's worker count
+            
             # Production based on workers and productivity
             firm._Q1e = workers_in_firm * firm._Btau * cap_sector._m1 if firm._Btau > 0 else 0.0
             cap_sector._Q1e += firm._Q1e
@@ -1304,6 +1306,17 @@ class Country(Agent):
         for firm in con_sector.firms:
             # Count workers in this firm
             workers_in_firm = sum(1 for w in self.workers if w._employed == 2 and getattr(w, '_employer', None) == firm)
+            firm._L2 = workers_in_firm  # Update firm's worker count
+            firm.write("_L2", workers_in_firm)  # Write to lag storage
+            
+            # Compute average wage for this firm's workers
+            if workers_in_firm > 0:
+                firm_worker_wages = [w._wReal for w in self.workers if w._employed == 2 and getattr(w, '_employer', None) == firm]
+                firm._w2avg = sum(firm_worker_wages) / len(firm_worker_wages)
+            else:
+                firm._w2avg = self.labor_market._wAvg
+            firm.write("_w2avg", firm._w2avg)  # Write to lag storage
+            
             # Production based on workers and productivity
             firm._Q2e = workers_in_firm * firm._A2 * con_sector._m2 if firm._A2 > 0 else 0.0
             con_sector._Q2e += firm._Q2e
@@ -1360,6 +1373,7 @@ class Country(Agent):
         # This matches the C++ equation: _S2 = _p2 * _D2
         for firm in con_sector.firms:
             firm._S2 = firm._p2 * firm._D2
+            firm.write("_S2", firm._S2)  # Write to lag storage for profit calculation
         
         # Actual consumption (in real terms)
         self._C = total_demand_fulfilled * con_sector._p2avg
