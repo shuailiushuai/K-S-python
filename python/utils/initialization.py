@@ -320,6 +320,7 @@ def initialize_firm2(firm, firm_num: int, total_firms: int, config: Dict[str, An
     # Initial production
     firm._Q2 = firm._D2 + firm._N  # Production includes inventory buildup
     firm._Q2e = firm._Q2
+    firm._Q2d = firm._Q2  # Desired production matches actual initially
     
     # Compute initial labor demand (production / labor productivity)
     firm._L2d = math.ceil(firm._Q2 / firm._A2)
@@ -331,6 +332,9 @@ def initialize_firm2(firm, firm_num: int, total_firms: int, config: Dict[str, An
         firm.history['A2'].append(firm._A2)
         firm.history['p2'].append(firm._p2)
         firm.history['Pi2'].append(0.0)
+        # Initialize demand history to support expected demand calculations
+        for _ in range(4):  # Keep 4 periods of history
+            firm.history['D2'].append(firm._D2)
 
 
 def initialize_worker(worker, worker_num: int, config: Dict[str, Any],

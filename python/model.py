@@ -6,6 +6,7 @@ Orchestrates the simulation, manages time-stepping and aggregation
 import yaml
 from typing import Dict, Any, List, Optional
 import numpy as np
+import math
 
 from agents.worker import Worker
 from agents.bank import Bank
@@ -145,10 +146,15 @@ class KSModel:
         print("  Setting up initial bank balance sheets...")
         self._initialize_bank_assets()
         
+        # Initialize aggregate tracking
+        print("  Initializing aggregate statistics...")
+        initial_cpi = init_cond['p20']
+        self.aggregates['CPI'].append(initial_cpi)
+        
         print(f"Initialized: {len(self.workers)} workers, {len(self.firms1)} Firm1, "
               f"{len(self.firms2)} Firm2, {len(self.banks)} banks")
         print(f"  Initial conditions: GDP≈${init_cond['D10']*init_cond['p10'] + init_cond['D20']*init_cond['p20']:.0f}, "
-              f"Wage=${init_cond['w_avg']:.2f}, CPI=${init_cond['p20']:.2f}")
+              f"Wage=${init_cond['w_avg']:.2f}, CPI=${initial_cpi:.2f}")
     
     def _initialize_bank_assets(self):
         """
@@ -194,6 +200,18 @@ class KSModel:
         unemployed_workers = list(self.workers)
         get_random_engine().shuffle(unemployed_workers)
         
+        # Calculate total labor demand
+        total_L1d = sum(getattr(f, '_L1d', 0) for f in self.firms1)
+        total_L2d = sum(getattr(f, '_L2d', 0) for f in self.firms2)
+        total_demand = total_L1d + total_L2d
+        
+        # If demand exceeds supply, scale down proportionally
+        if total_demand > len(self.workers):
+            scale_factor = len(self.workers) / total_demand
+            print(f"    Scaling labor demands by {scale_factor:.2f} to match supply")
+        else:
+            scale_factor = 1.0
+        
         worker_idx = 0
         
         # Allocate workers to Firm1 (capital-good sector)
@@ -201,7 +219,7 @@ class KSModel:
             if not hasattr(firm, '_L1d'):
                 continue
             
-            workers_needed = int(firm._L1d)
+            workers_needed = int(firm._L1d * scale_factor)
             for _ in range(workers_needed):
                 if worker_idx >= len(unemployed_workers):
                     break
@@ -218,7 +236,7 @@ class KSModel:
             if not hasattr(firm, '_L2d'):
                 continue
             
-            workers_needed = int(firm._L2d)
+            workers_needed = int(firm._L2d * scale_factor)
             for _ in range(workers_needed):
                 if worker_idx >= len(unemployed_workers):
                     break
@@ -336,9 +354,8 @@ class KSModel:
             firm.plan_investment(eta, b)
             
             # Compute desired labor
-            if hasattr(firm, '_Q2d'):
-                m2 = self.config.get('Consumption.m2', 1.0)
-                firm._L2d = firm._Q2d / m2 if m2 > 0 else 0
+            if hasattr(firm, '_Q2d') and hasattr(firm, '_A2'):
+                firm._L2d = firm._Q2d / firm._A2 if firm._A2 > 0 else 0
         
         # ==================================================================
         # 7. CAPITAL MARKET: Machine orders and delivery
@@ -350,8 +367,12 @@ class KSModel:
         # Compute desired production for sector 1
         for firm in self.firms1:
             m1 = self.config.get('Capital.m1', 0.1)
-            if hasattr(firm, '_D1'):
-                firm._L1d = firm._D1 / m1 if m1 > 0 else 0
+            # L1d = R&D workers + production workers
+            # Production workers = Q1 / (Btau * m1)
+            if hasattr(firm, '_Q1') and hasattr(firm, '_Btau'):
+                prod_workers = math.ceil(firm._Q1 / (firm._Btau * m1)) if firm._Btau > 0 and m1 > 0 else 0
+                rd_workers = getattr(firm, '_L1rd', 0)
+                firm._L1d = rd_workers + prod_workers
         
         # ==================================================================
         # 8. LABOR MARKET: Hiring and firing
