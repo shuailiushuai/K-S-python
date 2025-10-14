@@ -222,25 +222,83 @@ class Firm1:
         self._D1 = sum(client.machine_orders.get(self, 0.0) for client in self.clients)
         return self._D1
     
+    def plan_production(self) -> float:
+        """
+        Plan production based on orders and financing constraints
+        This determines Q1 (planned production) from D1 (orders)
+        considering available cash and credit
+        
+        Returns:
+            Planned production Q1
+        """
+        # Get financing parameters
+        D1 = self._D1  # Orders
+        CS1a = getattr(self, '_CS1a', 0.0)  # Available credit supply
+        NW1_prev = getattr(self, '_NW1', 0.0)  # Net worth (cash available)
+        c1 = self._c1  # Unit cost
+        p1 = self._p1  # Unit price
+        RD = self._RD  # R&D costs to pay
+        
+        # Cash needed to fulfill orders and R&D
+        cash_needed = D1 * (c1 - p1) + RD
+        
+        # Check financing
+        if cash_needed <= 0 or cash_needed <= NW1_prev:
+            # Can self-finance
+            self._Q1 = D1
+            cash_after = NW1_prev - cash_needed
+            credit_needed = 0.0
+        elif cash_needed <= NW1_prev + CS1a:
+            # Can finance with available credit
+            self._Q1 = D1
+            cash_after = 0.0
+            credit_needed = cash_needed - NW1_prev
+        else:
+            # Credit constrained - produce what we can afford
+            import math
+            self._Q1 = min(max(math.floor((NW1_prev + CS1a - RD) / c1), 0), D1)
+            
+            if self._Q1 == 0:
+                if RD <= NW1_prev:
+                    cash_after = NW1_prev - RD
+                    credit_needed = 0.0
+                else:
+                    cash_after = 0.0
+                    credit_needed = RD
+            else:
+                actual_cost = self._Q1 * c1 + RD
+                if actual_cost <= NW1_prev:
+                    cash_after = NW1_prev - actual_cost
+                    credit_needed = 0.0
+                else:
+                    cash_after = 0.0
+                    credit_needed = actual_cost - NW1_prev
+        
+        # Store provision for production
+        self._NW1p = NW1_prev - cash_after + credit_needed
+        
+        return self._Q1
+    
     def produce(self, m1: float) -> float:
         """
-        Produce machines
+        Produce machines based on workers actually hired
+        This calculates Q1e (effective production), not Q1 (planned production)
         
         Args:
             m1: Worker output scale
         
         Returns:
-            Production quantity
+            Effective production quantity (Q1e)
         """
-        # Production based on workers and productivity
-        self._Q1 = len(self.workers) * self._Btau * m1
-        self._Q1e = self._Q1  # Effective production
-        
-        return self._Q1
+        # Effective production based on workers and productivity
+        # Q1 (planned production) is set earlier by plan_production()
+        self._Q1e = len(self.workers) * self._Btau * m1
+        return self._Q1e
     
     def compute_sales(self) -> float:
         """Compute sales (min of demand and available supply)"""
-        available = self._Q1 + self._N1  # Production + inventories
+        # Use effective production Q1e, not planned Q1
+        available = self._Q1e + self._N1  # Production + inventories
         self._S1 = min(self._D1, available)
         self._N1 = available - self._S1  # Update inventories
         return self._S1

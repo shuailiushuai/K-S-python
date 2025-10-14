@@ -339,6 +339,7 @@ class KSModel:
         # ==================================================================
         # 6. CONSUMPTION-GOOD SECTOR: Demand expectations and investment
         # ==================================================================
+        m2 = self.config.get('Consumption.m2', 1.0)
         for firm in self.firms2:
             # Expected demand
             flag_expect = self.config.get('flagExpect', 0)
@@ -348,14 +349,19 @@ class KSModel:
             iota = self.config.get('Consumption.iota', 0.1)
             firm.compute_desired_production(iota)
             
+            # Planned production (considering financing constraints)
+            # This sets Q2 (planned) from Q2d (desired)
+            firm.plan_production(m2)
+            
             # Investment planning (expansion + substitution)
             eta = self.config.get('Consumption.eta', 20.0)
             b = self.config.get(f'Consumption.b{"Chg" if getattr(firm, "_postChg", False) else ""}', 3.0)
             firm.plan_investment(eta, b)
             
-            # Compute desired labor
-            if hasattr(firm, '_Q2d') and hasattr(firm, '_A2'):
-                firm._L2d = firm._Q2d / firm._A2 if firm._A2 > 0 else 0
+            # Compute labor demand based on PLANNED production Q2 (not desired Q2d)
+            if hasattr(firm, '_Q2') and hasattr(firm, '_A2'):
+                import math
+                firm._L2d = math.ceil(firm._Q2 / firm._A2) if firm._A2 > 0 else 0
         
         # ==================================================================
         # 7. CAPITAL MARKET: Machine orders and delivery
@@ -364,10 +370,17 @@ class KSModel:
         total_orders = self.capital_market.process_machine_orders(
             self.firms1, self.firms2, self.country_ext)
         
-        # Compute desired production for sector 1
+        # Compute desired production for sector 1 based on orders
+        m1 = self.config.get('Capital.m1', 0.1)
         for firm in self.firms1:
-            m1 = self.config.get('Capital.m1', 0.1)
-            # L1d = R&D workers + production workers
+            # Compute demand from orders
+            firm.compute_demand()
+            
+            # Plan production considering financing constraints
+            # This sets Q1 (planned) from D1 (orders)
+            firm.plan_production()
+            
+            # Compute labor demand: L1d = R&D workers + production workers
             # Production workers = Q1 / (Btau * m1)
             if hasattr(firm, '_Q1') and hasattr(firm, '_Btau'):
                 prod_workers = math.ceil(firm._Q1 / (firm._Btau * m1)) if firm._Btau > 0 and m1 > 0 else 0

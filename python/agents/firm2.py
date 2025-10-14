@@ -132,29 +132,89 @@ class Firm2:
     
     def compute_expected_demand(self, flag_expect: int) -> float:
         """Compute expected demand based on past demand"""
+        # Get historical demand (actual)
         if flag_expect == 0:  # Myopic 1-period
-            self._D2e = self.history['D2'].get(1) or 0.0
+            D2_hist = self.history['D2'].get(1) or self._D2
         elif flag_expect == 1:  # Myopic multi-period
             periods = [self.history['D2'].get(i) for i in range(1, 5)]
-            valid = [d for d in periods if d is not None]
-            self._D2e = sum(valid) / len(valid) if valid else 0.0
+            valid = [d for d in periods if d is not None and d > 0]
+            D2_hist = sum(valid) / len(valid) if valid else self._D2
         else:
             # Simplified adaptive expectations
-            lag1 = self.history['D2'].get(1) or 0.0
-            self._D2e = lag1
+            D2_hist = self.history['D2'].get(1) or self._D2
         
-        # Add animal spirits
+        # Mix actual demand with potential demand (animal spirits)
+        # D2e = (1 - e0) * D2_actual + e0 * D2_desired
         e0 = self.config.get(f'Consumption.e0{"Chg" if self._postChg else ""}', 1.0)
-        potential_demand = self._K * self.config.get('Consumption.u', 0.8)
-        self._D2e = (1 - e0) * self._D2e + e0 * potential_demand
+        
+        # Use past desired production as potential demand (if available)
+        # Otherwise use current desired production or actual demand
+        D2d_hist = getattr(self, '_Q2d', D2_hist)
+        
+        # Expected demand is mix of actual and potential
+        self._D2e = max((1 - e0) * D2_hist + e0 * D2d_hist, D2_hist)
         
         return self._D2e
     
     def compute_desired_production(self, iota: float) -> float:
         """Compute desired production including inventory target"""
         target_inventories = iota * self._D2e
-        self._Q2d = self._D2e + target_inventories - self._N
-        return max(self._Q2d, 0.0)
+        # Limit to available capital stock
+        desired_prod = self._D2e + target_inventories - self._N
+        self._Q2d = min(max(desired_prod, 0.0), self._K)
+        return self._Q2d
+    
+    def plan_production(self, m2: float) -> float:
+        """
+        Plan production based on desired production and financing constraints
+        This determines Q2 (planned production) from Q2d (desired production)
+        considering available cash and credit
+        
+        Returns:
+            Planned production Q2
+        """
+        # Get financing parameters
+        Q2d = self._Q2d
+        CS2a = getattr(self, '_CS2a', 0.0)  # Available credit supply
+        NW2_prev = getattr(self, '_NW2', 0.0)  # Net worth (cash available)
+        c2 = self._c2  # Expected unit cost
+        
+        # Cost of desired production
+        cost_desired = Q2d * c2
+        
+        # Check financing
+        if cost_desired <= NW2_prev:
+            # Can self-finance
+            self._Q2 = Q2d
+            cash_after = NW2_prev - cost_desired
+            credit_needed = 0.0
+        elif cost_desired <= NW2_prev + CS2a:
+            # Can finance with available credit
+            self._Q2 = Q2d
+            cash_after = 0.0
+            credit_needed = cost_desired - NW2_prev
+        else:
+            # Credit constrained - produce what we can afford
+            # Round to whole number of machines
+            import math
+            self._Q2 = math.floor(max((NW2_prev + CS2a) / c2, 0) / m2) * m2
+            
+            if self._Q2 == 0:
+                cash_after = NW2_prev
+                credit_needed = 0.0
+            else:
+                actual_cost = self._Q2 * c2
+                if actual_cost <= NW2_prev:
+                    cash_after = NW2_prev - actual_cost
+                    credit_needed = 0.0
+                else:
+                    cash_after = 0.0
+                    credit_needed = actual_cost - NW2_prev
+        
+        # Store provision for production
+        self._NW2p = NW2_prev - cash_after + credit_needed
+        
+        return self._Q2
     
     def compute_desired_capital(self, m2: float, u: float) -> float:
         """Compute desired capital stock"""
@@ -194,7 +254,10 @@ class Firm2:
         return self._EI, self._SI
     
     def produce(self, m2: float) -> float:
-        """Produce consumption goods"""
+        """
+        Produce consumption goods based on workers actually hired
+        This calculates Q2e (effective production), not Q2 (planned production)
+        """
         total_output = 0.0
         
         for vint in self.vintages:
@@ -202,9 +265,10 @@ class Firm2:
             output = workers_in_vint * vint.__AeVint * m2
             total_output += output
         
-        self._Q2 = total_output
+        # Set effective production (Q2e), not planned production (Q2)
+        # Q2 is set earlier by plan_production()
         self._Q2e = total_output
-        return self._Q2
+        return self._Q2e
     
     def compute_competitiveness(self, omega1: float, omega2: float, omega3: float) -> float:
         """Compute competitiveness index"""
