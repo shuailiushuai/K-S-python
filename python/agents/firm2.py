@@ -261,17 +261,24 @@ class Firm2:
         """
         Produce consumption goods based on workers actually hired
         This calculates Q2e (effective production), not Q2 (planned production)
+        
+        Q2e = min(Q2, Q2p)
+        Where Q2p = potential production from workers and machines
         """
-        total_output = 0.0
+        # Calculate potential production from workers and machines
+        # Q2p = L2 * A2 * m2 (simplified, assuming workers distributed across vintages)
+        num_workers = len(self.workers) if hasattr(self, 'workers') else 0
         
-        for vint in self.vintages:
-            workers_in_vint = len(vint.workers)
-            output = workers_in_vint * vint.__AeVint * m2
-            total_output += output
+        if num_workers > 0 and self._A2 > 0:
+            # Potential production from labor
+            Q2p = num_workers * self._A2 * m2
+        else:
+            Q2p = 0.0
         
-        # Set effective production (Q2e), not planned production (Q2)
-        # Q2 is set earlier by plan_production()
-        self._Q2e = total_output
+        # Effective production is minimum of planned and potential
+        # This ensures we can't produce more than planned (Q2) or more than workers can make (Q2p)
+        self._Q2e = min(self._Q2, Q2p) if hasattr(self, '_Q2') else Q2p
+        
         return self._Q2e
     
     def compute_competitiveness(self, omega1: float, omega2: float, omega3: float) -> float:
