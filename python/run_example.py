@@ -19,6 +19,7 @@ def create_test_config():
     config['Capital.F10'] = 5          # 5 capital-good firms
     config['Consumption.F20'] = 10     # 10 consumption-good firms
     config['Financial.B'] = 1          # 1 bank
+    config['Labor.Lscale'] = 1         # 1:1 worker objects to workers (for small tests)
     
     # Save test config
     with open('config/test_config.yaml', 'w') as f:
