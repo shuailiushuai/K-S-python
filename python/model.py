@@ -301,19 +301,36 @@ class KSModel:
                                                  self.banks, self.workers)
         
         # ==================================================================
-        # 4. LABOR MARKET: Workers apply for jobs
+        # 4. CONSUMPTION-GOOD SECTOR: Demand expectations, production planning, and labor demand
         # ==================================================================
-        # Workers post applications
-        total_applications = self.labor_market.worker_applications(
-            self.workers, self.firms1, self.firms2, self.country_ext)
-        
-        # Compute job openings
-        total_labor = len(self.workers)
-        L2d = sum(f._L2d for f in self.firms2 if hasattr(f, '_L2d'))
-        JO1 = self.labor_market.compute_job_openings_sector1(self.firms1, total_labor, L2d)
-        
-        # Create wage offers for sector 2
-        self.labor_market.create_wage_offers_sector2(self.firms2, self.country_ext)
+        # IMPORTANT: Must calculate L2d BEFORE worker applications!
+        m2 = self.config.get('Consumption.m2', 1.0)
+        for firm in self.firms2:
+            # Expected demand
+            flag_expect = self.config.get('flagExpect', 0)
+            firm.compute_expected_demand(flag_expect)
+            
+            # Desired production
+            iota = self.config.get('Consumption.iota', 0.1)
+            firm.compute_desired_production(iota)
+            
+            # Planned production (considering financing constraints)
+            # This sets Q2 (planned) from Q2d (desired)
+            firm.plan_production(m2)
+            
+            # Compute desired capital stock
+            u = self.config.get('Consumption.u', 0.75)  # Target utilization
+            firm.compute_desired_capital(m2, u)
+            
+            # Investment planning (expansion + substitution)
+            eta = self.config.get('Consumption.eta', 20.0)
+            b = self.config.get(f'Consumption.b{"Chg" if getattr(firm, "_postChg", False) else ""}', 3.0)
+            firm.plan_investment(eta, b)
+            
+            # Compute labor demand based on PLANNED production Q2 (not desired Q2d)
+            if hasattr(firm, '_Q2') and hasattr(firm, '_A2'):
+                import math
+                firm._L2d = math.ceil(firm._Q2 / firm._A2) if firm._A2 > 0 else 0
         
         # ==================================================================
         # 5. CAPITAL-GOOD SECTOR: R&D, innovation, and production planning
@@ -343,34 +360,7 @@ class KSModel:
             firm.compute_price(mu1)
         
         # ==================================================================
-        # 6. CONSUMPTION-GOOD SECTOR: Demand expectations and investment
-        # ==================================================================
-        m2 = self.config.get('Consumption.m2', 1.0)
-        for firm in self.firms2:
-            # Expected demand
-            flag_expect = self.config.get('flagExpect', 0)
-            firm.compute_expected_demand(flag_expect)
-            
-            # Desired production
-            iota = self.config.get('Consumption.iota', 0.1)
-            firm.compute_desired_production(iota)
-            
-            # Planned production (considering financing constraints)
-            # This sets Q2 (planned) from Q2d (desired)
-            firm.plan_production(m2)
-            
-            # Investment planning (expansion + substitution)
-            eta = self.config.get('Consumption.eta', 20.0)
-            b = self.config.get(f'Consumption.b{"Chg" if getattr(firm, "_postChg", False) else ""}', 3.0)
-            firm.plan_investment(eta, b)
-            
-            # Compute labor demand based on PLANNED production Q2 (not desired Q2d)
-            if hasattr(firm, '_Q2') and hasattr(firm, '_A2'):
-                import math
-                firm._L2d = math.ceil(firm._Q2 / firm._A2) if firm._A2 > 0 else 0
-        
-        # ==================================================================
-        # 7. CAPITAL MARKET: Machine orders and delivery
+        # 6. CAPITAL MARKET: Machine orders and delivery
         # ==================================================================
         # Process machine orders from sector 2 to sector 1
         total_orders = self.capital_market.process_machine_orders(
@@ -392,6 +382,21 @@ class KSModel:
                 prod_workers = math.ceil(firm._Q1 / (firm._Btau * m1)) if firm._Btau > 0 and m1 > 0 else 0
                 rd_workers = getattr(firm, '_L1rd', 0)
                 firm._L1d = rd_workers + prod_workers
+        
+        # ==================================================================
+        # 7. LABOR MARKET: Workers apply for jobs, firms post openings
+        # ==================================================================
+        # Workers post applications
+        total_applications = self.labor_market.worker_applications(
+            self.workers, self.firms1, self.firms2, self.country_ext)
+        
+        # Compute job openings (NOW we have L2d and L1d calculated!)
+        total_labor = len(self.workers)
+        L2d = sum(f._L2d for f in self.firms2 if hasattr(f, '_L2d'))
+        JO1 = self.labor_market.compute_job_openings_sector1(self.firms1, total_labor, L2d)
+        
+        # Create wage offers for sector 2
+        self.labor_market.create_wage_offers_sector2(self.firms2, self.country_ext)
         
         # ==================================================================
         # 8. LABOR MARKET: Hiring and firing

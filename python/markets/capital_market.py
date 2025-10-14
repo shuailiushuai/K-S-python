@@ -58,8 +58,24 @@ class CapitalMarket:
             # Distribute orders (simplified: equal distribution)
             orders_per_supplier = machines_needed / len(selected_suppliers)
             
+            # Record orders on the consuming firm
+            if not hasattr(firm2, 'machine_orders'):
+                firm2.machine_orders = {}
+            
             for supplier in selected_suppliers:
+                # Add to supplier's total demand
                 supplier._D1 += orders_per_supplier
+                
+                # Add client to supplier's client list if not already there
+                if not hasattr(supplier, 'clients'):
+                    supplier.clients = []
+                if firm2 not in supplier.clients:
+                    supplier.clients.append(firm2)
+                
+                # Record order on client firm
+                firm2.machine_orders[supplier] = orders_per_supplier
+                
+                # Store order details on supplier
                 if not hasattr(supplier, 'orders'):
                     supplier.orders = []
                 supplier.orders.append({
@@ -98,7 +114,7 @@ class CapitalMarket:
             competitiveness.append((comp, supplier))
         
         # Select best supplier(s) - in simple version, just the best one
-        competitiveness.sort(reverse=True)
+        competitiveness.sort(key=lambda x: x[0], reverse=True)
         
         # Store selected supplier
         if competitiveness:
@@ -148,23 +164,28 @@ class CapitalMarket:
         Add delivered machines as a new vintage to consumption firm
         Creates vintage with supplier's technology
         """
+        from agents.firm2 import Vintage
+        
         if not hasattr(firm2, 'vintages'):
-            firm2.vintages = {}
+            firm2.vintages = []
         
         # Get technology from supplier
         productivity = supplier._Atau if hasattr(supplier, '_Atau') else 1.0
         
         # Create vintage ID
-        vintage_id = f"t{len(firm2.vintages)}_s{supplier.id}"
+        vintage_id = len(firm2.vintages)
+        
+        # Create new vintage
+        new_vintage = Vintage(
+            vintage_id=vintage_id,
+            productivity=productivity,
+            price=price,
+            n_machines=int(quantity),
+            build_time=-1  # Current period
+        )
         
         # Add to firm's capital stock
-        firm2.vintages[vintage_id] = {
-            'productivity': productivity,
-            'quantity': quantity,
-            'age': 0,
-            'price': price,
-            'supplier_id': supplier.id
-        }
+        firm2.vintages.append(new_vintage)
         
         # Update capital stock
         if not hasattr(firm2, '_K'):

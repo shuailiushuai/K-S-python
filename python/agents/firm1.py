@@ -290,9 +290,12 @@ class Firm1:
         Returns:
             Effective production quantity (Q1e)
         """
-        # Effective production based on workers and productivity
-        # Q1 (planned production) is set earlier by plan_production()
-        self._Q1e = len(self.workers) * self._Btau * m1
+        # Calculate potential production from workers
+        num_workers = len(self.workers) if hasattr(self, 'workers') else 0
+        Q1p = num_workers * self._Btau * m1 if num_workers > 0 and self._Btau > 0 else 0.0
+        
+        # Effective production is minimum of planned and potential
+        self._Q1e = min(self._Q1, Q1p) if hasattr(self, '_Q1') else Q1p
         return self._Q1e
     
     def compute_sales(self) -> float:
