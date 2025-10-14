@@ -288,20 +288,7 @@ class KSModel:
         self.central_bank.compute_required_reserves(self.banks)
         
         # ==================================================================
-        # 3. GOVERNMENT: Compute expenditure and collect taxes
-        # ==================================================================
-        # Update labor statistics for government
-        self._update_labor_stats()
-        
-        # Compute government expenditure (unemployment benefits + training)
-        gov_expenditure = self.government.compute_expenditure(self.workers, self.labor_stats)
-        
-        # Collect taxes
-        tax_data = self.government.collect_taxes(self.firms1, self.firms2, 
-                                                 self.banks, self.workers)
-        
-        # ==================================================================
-        # 4. CONSUMPTION-GOOD SECTOR: Demand expectations, production planning, and labor demand
+        # 3. CONSUMPTION-GOOD SECTOR: Demand expectations, production planning, and labor demand
         # ==================================================================
         # IMPORTANT: Must calculate L2d BEFORE worker applications!
         m2 = self.config.get('Consumption.m2', 1.0)
@@ -333,7 +320,7 @@ class KSModel:
                 firm._L2d = math.ceil(firm._Q2 / firm._A2) if firm._A2 > 0 else 0
         
         # ==================================================================
-        # 5. CAPITAL-GOOD SECTOR: R&D, innovation, and production planning
+        # 4. CAPITAL-GOOD SECTOR: R&D, innovation, and production planning
         # ==================================================================
         for firm in self.firms1:
             # R&D investment
@@ -360,7 +347,7 @@ class KSModel:
             firm.compute_price(mu1)
         
         # ==================================================================
-        # 6. CAPITAL MARKET: Machine orders and delivery
+        # 5. CAPITAL MARKET: Machine orders and delivery
         # ==================================================================
         # Process machine orders from sector 2 to sector 1
         total_orders = self.capital_market.process_machine_orders(
@@ -384,7 +371,7 @@ class KSModel:
                 firm._L1d = rd_workers + prod_workers
         
         # ==================================================================
-        # 7. LABOR MARKET: Workers apply for jobs, firms post openings
+        # 6. LABOR MARKET: Workers apply for jobs, firms post openings
         # ==================================================================
         # Workers post applications
         total_applications = self.labor_market.worker_applications(
@@ -399,7 +386,7 @@ class KSModel:
         self.labor_market.create_wage_offers_sector2(self.firms2, self.country_ext)
         
         # ==================================================================
-        # 8. LABOR MARKET: Hiring and firing
+        # 7. LABOR MARKET: Hiring and firing
         # ==================================================================
         # Hire workers in sector 1
         hires1 = self.labor_market.hire_workers_sector1(self.firms1)
@@ -415,7 +402,7 @@ class KSModel:
         self._update_worker_skills()
         
         # ==================================================================
-        # 9. PRODUCTION: Both sectors produce
+        # 8. PRODUCTION: Both sectors produce
         # ==================================================================
         # Capital-good sector production
         m1 = self.config.get('Capital.m1', 0.1)
@@ -431,14 +418,35 @@ class KSModel:
             firm.produce(m2)
         
         # ==================================================================
-        # 10. GOODS MARKET: Consumption allocation
+        # 9. GOVERNMENT EXPENDITURE: Calculate G based on finalized employment
+        # ==================================================================
+        # Update labor statistics (now employment is finalized after hiring/firing)
+        self._update_labor_stats()
+        
+        # Compute government expenditure (unemployment benefits + training)
+        # This matches C++ step 19: NEW_VS( v[19], THIS, "G" )
+        gov_expenditure = self.government.compute_expenditure(self.workers, self.labor_stats)
+        
+        # ==================================================================
+        # 11. GOODS MARKET: Consumption allocation
         # ==================================================================
         # Compute consumption demand
+        # Note: Wage taxes are computed on-the-fly from current wages
+        # (in C++, TaxW is computed lazily when Cd is accessed)
         past_bonus = sum(getattr(w, '_Bon', 0) for w in self.workers)
         past_dividends = 0.0  # Simplified
+        
+        # Compute wage taxes on-the-fly (like C++ lazy evaluation)
+        flag_tax = self.config.get('Country.flagTax', 1)
+        tr = self.config.get('Country.tr', 0.1)
+        wage_tax = 0.0
+        if flag_tax >= 1:
+            wage_tax = sum((w._w + getattr(w, '_Bon', 0)) * tr 
+                          for w in self.workers if w._employed > 0)
+        
         consumption_demand, self.savings_acc = self.goods_market.compute_consumption_demand(
             self.workers, gov_expenditure, past_bonus, past_dividends,
-            tax_data['wages'], tax_data.get('dividends', 0), self.savings_acc)
+            wage_tax, 0.0, self.savings_acc)  # dividend_tax=0 for now
         
         # Allocate consumption to firms
         total_fulfilled = self.goods_market.allocate_consumption_demand(
@@ -449,7 +457,7 @@ class KSModel:
         self.goods_market.update_inventories(self.firms2)
         
         # ==================================================================
-        # 11. FINANCIAL RESULTS: Profits and dividends
+        # 12. FINANCIAL RESULTS: Profits and dividends
         # ==================================================================
         for firm in self.firms1:
             firm.compute_profits()
@@ -469,7 +477,14 @@ class KSModel:
         self.central_bank.compute_profits(self.banks, self.government.public_debt)
         
         # ==================================================================
-        # 12. MARKET SHARE DYNAMICS
+        # 13. TAX COLLECTION: Collect taxes on profits
+        # ==================================================================
+        # This matches C++ steps 27-29: Tax1, Tax2, TaxB
+        tax_data = self.government.collect_taxes(self.firms1, self.firms2, 
+                                                 self.banks, self.workers)
+        
+        # ==================================================================
+        # 14. MARKET SHARE DYNAMICS
         # ==================================================================
         n1 = self.config.get('Capital.n1', 4)
         for firm in self.firms1:
@@ -483,28 +498,31 @@ class KSModel:
             firm.compute_competitiveness(omega1, omega2, omega3)
             firm.update_market_share(self.firms2, chi)
         
+        # Rescale market shares to sum to 1.0 (equivalent to f2rescale in C++)
+        self._rescale_market_shares()
+        
         # ==================================================================
-        # 13. GOVERNMENT: Update public debt
+        # 15. GOVERNMENT: Update public debt
         # ==================================================================
         self.government.update_public_debt(self.central_bank.prime_rate)
         
         # ==================================================================
-        # 14. CENTRAL BANK: Bailout insolvent banks
+        # 16. CENTRAL BANK: Bailout insolvent banks
         # ==================================================================
         total_bailout = self.central_bank.bailout_banks(self.banks)
         
         # ==================================================================
-        # 15. ENTRY AND EXIT (Simplified for now)
+        # 17. ENTRY AND EXIT (Simplified for now)
         # ==================================================================
         # TODO: Implement full entry/exit logic
         
         # ==================================================================
-        # 16. CAPITAL STOCK: Age vintages and scrap old machines
+        # 18. CAPITAL STOCK: Age vintages and scrap old machines
         # ==================================================================
         self.capital_market.age_vintages(self.firms2)
         
         # ==================================================================
-        # 17. UPDATE HISTORIES: All agents
+        # 19. UPDATE HISTORIES: All agents
         # ==================================================================
         for worker in self.workers:
             if hasattr(worker, 'update_history'):
@@ -520,7 +538,7 @@ class KSModel:
                 firm.update_history()
         
         # ==================================================================
-        # 18. AGGREGATE STATISTICS
+        # 20. AGGREGATE STATISTICS
         # ==================================================================
         self._compute_aggregates()
     
@@ -642,6 +660,39 @@ class KSModel:
         # Consumption (total sales)
         consumption = sum(f._D2 for f in self.firms2 if hasattr(f, '_D2'))
         self.aggregates['consumption'].append(consumption)
+    
+    def _rescale_market_shares(self):
+        """
+        Rescale market shares to ensure they sum to 1.0
+        Equivalent to f2rescale equation in C++ (fun_KS_consumption.h)
+        """
+        # Sector 1 (capital goods)
+        if self.firms1:
+            total_f1 = sum(f._f1 for f in self.firms1 if hasattr(f, '_f1'))
+            if abs(total_f1 - 1.0) > 0.001:  # Ignore rounding errors
+                if total_f1 > 0:
+                    for firm in self.firms1:
+                        if hasattr(firm, '_f1'):
+                            firm._f1 = firm._f1 / total_f1
+                else:
+                    # Equal shares if no production
+                    fair_share = 1.0 / len(self.firms1)
+                    for firm in self.firms1:
+                        firm._f1 = fair_share
+        
+        # Sector 2 (consumption goods)
+        if self.firms2:
+            total_f2 = sum(f._f2 for f in self.firms2 if hasattr(f, '_f2'))
+            if abs(total_f2 - 1.0) > 0.001:  # Ignore rounding errors
+                if total_f2 > 0:
+                    for firm in self.firms2:
+                        if hasattr(firm, '_f2'):
+                            firm._f2 = firm._f2 / total_f2
+                else:
+                    # Equal shares if no production
+                    fair_share = 1.0 / len(self.firms2)
+                    for firm in self.firms2:
+                        firm._f2 = fair_share
     
     def run(self, periods: int):
         """

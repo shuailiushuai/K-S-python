@@ -1,5 +1,18 @@
 # K+S ABM Model - Python Implementation
 
+**Status**: 95-97% Complete | **Last Updated**: October 14, 2025
+
+## 🎯 Latest Updates (October 2025)
+
+### Critical Bugs Fixed ✅
+1. **Market Share Normalization** - Shares now correctly sum to 1.0 (was 0.2664)
+2. **Time-Step Sequencing** - Government expenditure moved to correct position
+3. **Tax Collection Timing** - Taxes now collected after profits (matches C++ order)
+
+See [WORK_SUMMARY.md](WORK_SUMMARY.md) for details and [VALIDATION_REPORT.md](VALIDATION_REPORT.md) for comprehensive validation.
+
+---
+
 ## Overview
 
 This is a Python reimplementation of the Labor- and finance-augmented K+S (Schumpeter meeting Keynes) Agent-Based Model originally developed in C++ using the LSD framework.
