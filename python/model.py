@@ -318,6 +318,10 @@ class KSModel:
             # This sets Q2 (planned) from Q2d (desired)
             firm.plan_production(m2)
             
+            # Compute desired capital stock
+            u = self.config.get('Consumption.u', 0.75)  # Target utilization
+            firm.compute_desired_capital(m2, u)
+            
             # Investment planning (expansion + substitution)
             eta = self.config.get('Consumption.eta', 20.0)
             b = self.config.get(f'Consumption.b{"Chg" if getattr(firm, "_postChg", False) else ""}', 3.0)

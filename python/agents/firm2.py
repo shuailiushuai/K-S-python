@@ -226,6 +226,8 @@ class Firm2:
             self._Kd = (self._Q2d / (self._A2 * u)) * m2
         else:
             self._Kd = self._K
+        # Debug
+        # print(f"    Firm2[{self.id}]: Q2d={self._Q2d:.2f}, A2={self._A2:.4f}, u={u:.2f}, m2={m2:.2f} → Kd={self._Kd:.2f}")
         return self._Kd
     
     def plan_investment(self, eta: float, b: float) -> tuple:

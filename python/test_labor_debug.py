@@ -58,11 +58,25 @@ total_wages = sum(w._w for w in model.workers if w._employed > 0)
 print(f"Total wages paid: ${total_wages:.2f}")
 print(f"Number of employed workers: {sum(1 for w in model.workers if w._employed > 0)}")
 
+# Check Firm2 investment desires before time step
+print(f"\nFirm2 capital stock (BEFORE time step):")
+for i, firm in enumerate(model.firms2):
+    print(f"  Firm2[{i}]: K={getattr(firm, '_K', 0):.2f}, Kd={getattr(firm, '_Kd', 0):.2f}, Q2d={getattr(firm, '_Q2d', 0):.2f}, A2={getattr(firm, '_A2', 1):.4f}, EI={getattr(firm, '_EI', 0):.2f}, SI={getattr(firm, '_SI', 0):.2f}")
+
 model.time_step()
 
 # Check actual consumption
 consumption = model.aggregates['consumption'][-1] if model.aggregates['consumption'] else 0
 print(f"Consumption: {consumption:.2f} units")
+
+# Check machine orders
+print(f"\nFirm1 machine orders (AFTER period 1):")
+for i, firm in enumerate(model.firms1):
+    print(f"  Firm1[{i}]: D1={getattr(firm, '_D1', 0):.2f}, Q1={getattr(firm, '_Q1', 0):.2f}, orders={len(firm.orders) if hasattr(firm, 'orders') else 0}")
+
+print(f"\nFirm2 capital stock (AFTER period 1):")
+for i, firm in enumerate(model.firms2):
+    print(f"  Firm2[{i}]: K={getattr(firm, '_K', 0):.2f}, Kd={getattr(firm, '_Kd', 0):.2f}, Q2d={getattr(firm, '_Q2d', 0):.2f}, A2={getattr(firm, '_A2', 1):.4f}, EI={getattr(firm, '_EI', 0):.2f}, SI={getattr(firm, '_SI', 0):.2f}")
 
 # Check L2d after time step
 print(f"\nAfter period 1 - L2d values:")
