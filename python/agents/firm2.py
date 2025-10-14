@@ -127,7 +127,8 @@ class Firm2:
             'A2': TimeSeriesData('productivity'),
             'p2': TimeSeriesData('price'),
             'Pi2': TimeSeriesData('profits'),
-            'D2': TimeSeriesData('demand')
+            'D2': TimeSeriesData('demand'),
+            'D2d': TimeSeriesData('desired_demand')
         }
     
     def compute_expected_demand(self, flag_expect: int) -> float:
@@ -135,21 +136,24 @@ class Firm2:
         # Get historical demand (actual)
         if flag_expect == 0:  # Myopic 1-period
             D2_hist = self.history['D2'].get(1) or self._D2
+            D2d_hist = self.history['D2d'].get(1) or self._D2
         elif flag_expect == 1:  # Myopic multi-period
             periods = [self.history['D2'].get(i) for i in range(1, 5)]
             valid = [d for d in periods if d is not None and d > 0]
             D2_hist = sum(valid) / len(valid) if valid else self._D2
+            
+            # For desired, also average
+            periods_d = [self.history['D2d'].get(i) for i in range(1, 5)]
+            valid_d = [d for d in periods_d if d is not None and d > 0]
+            D2d_hist = sum(valid_d) / len(valid_d) if valid_d else D2_hist
         else:
             # Simplified adaptive expectations
             D2_hist = self.history['D2'].get(1) or self._D2
+            D2d_hist = self.history['D2d'].get(1) or D2_hist
         
         # Mix actual demand with potential demand (animal spirits)
         # D2e = (1 - e0) * D2_actual + e0 * D2_desired
         e0 = self.config.get(f'Consumption.e0{"Chg" if self._postChg else ""}', 1.0)
-        
-        # Use past desired production as potential demand (if available)
-        # Otherwise use current desired production or actual demand
-        D2d_hist = getattr(self, '_Q2d', D2_hist)
         
         # Expected demand is mix of actual and potential
         self._D2e = max((1 - e0) * D2_hist + e0 * D2d_hist, D2_hist)
@@ -333,6 +337,7 @@ class Firm2:
         self.history['p2'].append(self._p2)
         self.history['Pi2'].append(self._Pi2)
         self.history['D2'].append(self._D2)
+        self.history['D2d'].append(self._D2d)
     
     def __repr__(self):
         return f"Firm2(id={self.id}, f2={self._f2:.3f}, A={self._A2:.2f}, p={self._p2:.2f})"
