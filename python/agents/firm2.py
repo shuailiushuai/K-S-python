@@ -156,6 +156,7 @@ class Firm2:
         e0 = self.config.get(f'Consumption.e0{"Chg" if self._postChg else ""}', 1.0)
         
         # Expected demand is mix of actual and potential
+        # IMPORTANT: This must be greater than or equal to D2_hist to avoid collapse
         self._D2e = max((1 - e0) * D2_hist + e0 * D2d_hist, D2_hist)
         
         return self._D2e

@@ -448,6 +448,17 @@ class KSModel:
             self.workers, gov_expenditure, past_bonus, past_dividends,
             wage_tax, 0.0, self.savings_acc)  # dividend_tax=0 for now
         
+        # CRITICAL: Compute D2d (desired demand in real terms) before allocation
+        # D2d = Cd / CPI (fun_KS_consumption.h:409)
+        # This is used in NEXT period's expected demand calculation
+        CPI = self._compute_cpi()
+        D2d_real = consumption_demand / CPI if CPI > 0 else 0.0
+        
+        # Distribute D2d to firms based on market shares
+        # _D2d = _f2 * D2d (fun_KS_firm2.h:798)
+        for firm in self.firms2:
+            firm._D2d = firm._f2 * D2d_real
+        
         # Allocate consumption to firms
         total_fulfilled = self.goods_market.allocate_consumption_demand(
             self.firms2, consumption_demand)
