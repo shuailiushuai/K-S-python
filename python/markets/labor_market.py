@@ -121,28 +121,31 @@ class LaborMarket:
         # Apply to random firms in sector 1
         if len(firms1) > 0:
             num_apps = min(n1, len(firms1))
-            selected_firms = get_random_engine().sample(firms1, num_apps)
+            # Use numpy for sampling
+            indices = get_random_engine().rng.choice(len(firms1), size=num_apps, replace=False)
+            selected_firms = [firms1[i] for i in indices]
             for firm in selected_firms:
                 app = Application(
                     w=worker._wRes,  # Reservation wage
                     s=worker._s,     # Skills
                     ws=worker._s * worker._wRes,  # Combined metric
-                    Te=worker._Te,
-                    wrk=worker
+                    te=worker._Te,
+                    worker=worker
                 )
                 self.applications_sector1.append(app)
         
         # Apply to random firms in sector 2
         if len(firms2) > 0:
             num_apps = min(n2, len(firms2))
-            selected_firms = get_random_engine().sample(firms2, num_apps)
+            indices = get_random_engine().rng.choice(len(firms2), size=num_apps, replace=False)
+            selected_firms = [firms2[i] for i in indices]
             for firm in selected_firms:
                 app = Application(
                     w=worker._wRes,
                     s=worker._s,
                     ws=worker._s * worker._wRes,
-                    Te=worker._Te,
-                    wrk=worker
+                    te=worker._Te,
+                    worker=worker
                 )
                 firm.applications.append(app)
     
@@ -154,7 +157,8 @@ class LaborMarket:
         # Sample and select best wage offers in sector 1
         if len(firms1) > 0:
             sample_size = min(n1 * 3, len(firms1))  # Sample more, select best
-            sampled = get_random_engine().sample(firms1, sample_size)
+            indices = get_random_engine().rng.choice(len(firms1), size=sample_size, replace=False)
+            sampled = [firms1[i] for i in indices]
             # Sort by wage offer
             sampled.sort(key=lambda f: f._w1o if hasattr(f, '_w1o') else 0, reverse=True)
             selected = sampled[:n1]
@@ -164,8 +168,8 @@ class LaborMarket:
                     w=worker._wRes,
                     s=worker._s,
                     ws=worker._s * worker._wRes,
-                    Te=worker._Te,
-                    wrk=worker
+                    te=worker._Te,
+                    worker=worker
                 )
                 self.applications_sector1.append(app)
         
@@ -178,8 +182,8 @@ class LaborMarket:
                     w=worker._wRes,
                     s=worker._s,
                     ws=worker._s * worker._wRes,
-                    Te=worker._Te,
-                    wrk=worker
+                    te=worker._Te,
+                    worker=worker
                 )
                 offer.firm.applications.append(app)
     
@@ -197,8 +201,8 @@ class LaborMarket:
                     w=worker._wRes,
                     s=worker._s,
                     ws=worker._s * worker._wRes,
-                    Te=worker._Te,
-                    wrk=worker
+                    te=worker._Te,
+                    worker=worker
                 )
                 self.applications_sector1.append(app)
         
@@ -210,8 +214,8 @@ class LaborMarket:
                     w=worker._wRes,
                     s=worker._s,
                     ws=worker._s * worker._wRes,
-                    Te=worker._Te,
-                    wrk=worker
+                    te=worker._Te,
+                    worker=worker
                 )
                 firm.applications.append(app)
     
@@ -237,8 +241,8 @@ class LaborMarket:
                     w=worker._wRes,
                     s=worker._s,
                     ws=worker._s * worker._wRes,
-                    Te=worker._Te,
-                    wrk=worker
+                    te=worker._Te,
+                    worker=worker
                 )
                 self.applications_sector1.append(app)
         
@@ -259,8 +263,8 @@ class LaborMarket:
                     w=worker._wRes,
                     s=worker._s,
                     ws=worker._s * worker._wRes,
-                    Te=worker._Te,
-                    wrk=worker
+                    te=worker._Te,
+                    worker=worker
                 )
                 firm.applications.append(app)
     
@@ -352,11 +356,11 @@ class LaborMarket:
             
             # Find applications for this firm
             firm_applications = [app for app in self.applications_sector1 
-                               if app.wrk._employed == 0]
+                               if app.worker._employed == 0]
             
             hired = 0
             for app in firm_applications[:positions]:
-                if self._hire_worker(app.wrk, 1, firm, firm._w1o):
+                if self._hire_worker(app.worker, 1, firm, firm._w1o):
                     hired += 1
                 if hired >= positions:
                     break
@@ -399,13 +403,13 @@ class LaborMarket:
                     break
                 
                 # Check if not already hired and wage acceptable
-                if not (app.wrk._employed > 0 and app.wrk._Te == 0):
+                if not (app.worker._employed > 0 and app.worker._Te == 0):
                     if app.w <= offer.offer * 1.01:  # Small tolerance
-                        if self._hire_worker(app.wrk, 2, firm, offer.offer):
+                        if self._hire_worker(app.worker, 2, firm, offer.offer):
                             hired += 1
                     elif app.w < min_wage:
                         min_wage = app.w
-                        min_wage_worker = app.wrk
+                        min_wage_worker = app.worker
             
             # Try to hire at least one worker at any wage
             if positions - hired > 0 and hired == 0 and min_wage_worker:

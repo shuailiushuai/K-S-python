@@ -86,7 +86,8 @@ class CapitalMarket:
         
         # Sample n1 suppliers randomly
         sample_size = min(n1, len(firms1))
-        sampled = get_random_engine().sample(firms1, sample_size)
+        indices = get_random_engine().rng.choice(len(firms1), size=sample_size, replace=False)
+        sampled = [firms1[i] for i in indices]
         
         # Compute competitiveness: higher productivity / lower price is better
         competitiveness = []
@@ -177,20 +178,26 @@ class CapitalMarket:
         b = self.config.get('Consumption.b', 3.0)
         
         for firm in firms2:
-            if not hasattr(firm, 'vintages'):
+            if not hasattr(firm, 'vintages') or not firm.vintages:
                 continue
             
-            vintages_to_remove = []
-            
-            for vintage_id, vintage in firm.vintages.items():
-                vintage['age'] += 1
+            # Handle both dict and list structures
+            if isinstance(firm.vintages, dict):
+                vintages_to_remove = []
                 
-                # Scrap if too old
-                if vintage['age'] > b:
-                    vintages_to_remove.append(vintage_id)
-                    if hasattr(firm, '_K'):
-                        firm._K -= vintage['quantity']
-            
-            # Remove scrapped vintages
-            for vid in vintages_to_remove:
-                del firm.vintages[vid]
+                for vintage_id, vintage in firm.vintages.items():
+                    vintage['age'] += 1
+                    
+                    # Scrap if too old
+                    if vintage['age'] > b:
+                        vintages_to_remove.append(vintage_id)
+                        if hasattr(firm, '_K'):
+                            firm._K -= vintage['quantity']
+                
+                # Remove scrapped vintages
+                for vid in vintages_to_remove:
+                    del firm.vintages[vid]
+            elif isinstance(firm.vintages, list):
+                # Handle list structure
+                firm.vintages = [v for v in firm.vintages 
+                               if hasattr(v, 'age') and v.age <= b]

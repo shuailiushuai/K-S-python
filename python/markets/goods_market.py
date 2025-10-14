@@ -42,8 +42,12 @@ class GoodsMarket:
         for firm in firms2:
             # Available supply = expected production + inventory
             avail_supply = firm._Q2e if hasattr(firm, '_Q2e') else 0
-            if hasattr(firm, '_N') and len(firm.history['_N']) > 0:
-                avail_supply += firm.history['_N'][-1]  # Previous period inventory
+            if hasattr(firm, '_N'):
+                # Get previous inventory
+                if hasattr(firm, 'history') and '_N' in firm.history and firm.history['_N']:
+                    avail_supply += firm.history['_N'][-1]
+                else:
+                    avail_supply += firm._N  # Current inventory
             
             supply.append(avail_supply)
             market_shares.append(firm._f2 if hasattr(firm, '_f2') else 0)
