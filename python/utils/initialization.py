@@ -327,14 +327,17 @@ def initialize_firm2(firm, firm_num: int, total_firms: int, config: Dict[str, An
     firm._L2 = firm._L2d  # Initially fully staffed
     
     # Initialize history
+    # Note: Do NOT append initial values to history!
+    # The initial value is stored in _D2, _D2d, etc., and will be used
+    # as a fallback when history is empty (during period 1).
+    # History will start being populated at the end of period 1.
     if hasattr(firm, 'history'):
         firm.history['f2'].append(firm._f2)
         firm.history['A2'].append(firm._A2)
         firm.history['p2'].append(firm._p2)
         firm.history['Pi2'].append(0.0)
-        # Initialize demand history to support expected demand calculations
-        for _ in range(4):  # Keep 4 periods of history
-            firm.history['D2'].append(firm._D2)
+        # Do NOT initialize D2/D2d history - let it start empty
+
 
 
 def initialize_worker(worker, worker_num: int, config: Dict[str, Any],

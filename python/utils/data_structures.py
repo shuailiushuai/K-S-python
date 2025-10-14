@@ -124,7 +124,11 @@ class TimeSeriesData:
         self.data.append(value)
     
     def get(self, lag: int = 0) -> Optional[float]:
-        """Get value with lag (0 = current, 1 = previous, etc.)"""
+        """
+        Get value with lag
+        lag=0 returns the most recent value (last appended)
+        lag=1 returns the value from 1 period ago, etc.
+        """
         idx = len(self.data) - 1 - lag
         if 0 <= idx < len(self.data):
             return self.data[idx]
