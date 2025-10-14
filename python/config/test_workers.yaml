@@ -2,7 +2,7 @@ Bank._IDb: 0
 Bank._fD: 0
 Broch.__IDs: 0
 Capital.Deb10ratio: 1
-Capital.F10: 5
+Capital.F10: 1
 Capital.F1max: 50
 Capital.F1min: 50
 Capital.L1rdMax: 0.2
@@ -36,7 +36,7 @@ Cli.__tSel: 0
 Cli1.__ID1: 0
 Cli2.__ID2: 0
 Consumption.Deb20ratio: 1
-Consumption.F20: 10
+Consumption.F20: 2
 Consumption.F2max: 200
 Consumption.F2min: 200
 Consumption.NW20: 1000
@@ -165,8 +165,8 @@ Firm2._postChg: 0
 Firm2._t2ent: 0
 Labor.Gamma: 0
 Labor.GammaCost: 0.1
-Labor.Ls0: 100
-Labor.Lscale: 1
+Labor.Ls0: 10
+Labor.Lscale: 50
 Labor.Tc: 1
 Labor.Tp: 0
 Labor.Tr: 120

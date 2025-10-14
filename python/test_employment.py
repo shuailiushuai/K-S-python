@@ -20,6 +20,7 @@ config['Labor.Ls0'] = 50  # 50 workers
 config['Capital.F10'] = 3  # 3 capital firms
 config['Consumption.F20'] = 5  # 5 consumption firms
 config['Financial.B'] = 1  # 1 bank
+config['Labor.Lscale'] = 1  # Set to 1 for testing (each worker object = 1 worker)
 
 with open('config/test_employment.yaml', 'w') as f:
     yaml.dump(config, f)
