@@ -13,6 +13,8 @@ from agents.firm1 import Firm1
 from agents.firm2 import Firm2
 from utils.core_utils import init_random_engine, get_random_engine, INIPROD, INIWAGE, INISKILL
 from utils.data_structures import CountryExtension
+from utils.initialization import (compute_initial_conditions, initialize_firm1, 
+                                  initialize_firm2, initialize_worker, initialize_bank)
 from markets import LaborMarket, GoodsMarket, CapitalMarket, Government, CentralBank
 
 
@@ -83,28 +85,37 @@ class KSModel:
         """Initialize all agents and set up initial conditions"""
         print("Initializing K+S model...")
         
+        # Compute initial equilibrium conditions
+        print("  Computing initial equilibrium conditions...")
+        init_cond = compute_initial_conditions(self.config)
+        
         # Initialize banks
         B = self.config.get('Financial.B', 1)
+        print(f"  Creating {B} banks...")
         for i in range(B):
             bank = Bank(i + 1, self.config)
+            initialize_bank(bank, i + 1, B, self.config, init_cond)
             self.banks.append(bank)
             self.country_ext.bank_ptr.append(bank)
         
         # Initialize capital-good firms (Firm1)
         F10 = self.config.get('Capital.F10', 50)
+        print(f"  Creating {F10} capital-good firms...")
         for i in range(F10):
             firm = Firm1(i + 1, self.config)
-            self.firms1.append(firm)
             # Assign bank
             bank_idx = get_random_engine().uniform_int(0, B - 1)
             firm.bank = self.banks[bank_idx]
             firm._bank1 = bank_idx + 1
+            # Initialize with proper values
+            initialize_firm1(firm, i + 1, F10, self.config, init_cond, new_industry=True)
+            self.firms1.append(firm)
         
         # Initialize consumption-good firms (Firm2)
         F20 = self.config.get('Consumption.F20', 200)
+        print(f"  Creating {F20} consumption-good firms...")
         for i in range(F20):
             firm = Firm2(i + 1, self.config)
-            self.firms2.append(firm)
             self.country_ext.firm2_ptr.append(firm)
             self.country_ext.firm2_map[firm.id] = firm
             # Assign bank
@@ -114,15 +125,114 @@ class KSModel:
             # Assign supplier
             supplier_idx = get_random_engine().uniform_int(0, F10 - 1)
             firm.supplier = self.firms1[supplier_idx]
+            # Initialize with proper values
+            initialize_firm2(firm, i + 1, F20, self.config, init_cond, new_industry=True)
+            self.firms2.append(firm)
         
         # Initialize workers
         Ls0 = self.config.get('Labor.Ls0', 1000)
+        print(f"  Creating {Ls0} workers...")
         for i in range(Ls0):
             worker = Worker(i + 1, self.config)
+            initialize_worker(worker, i + 1, self.config, init_cond)
             self.workers.append(worker)
+        
+        # Allocate initial employment to firms based on their labor demand
+        print("  Allocating initial employment...")
+        self._initialize_employment()
+        
+        # Set up initial bank assets based on firm loans
+        print("  Setting up initial bank balance sheets...")
+        self._initialize_bank_assets()
         
         print(f"Initialized: {len(self.workers)} workers, {len(self.firms1)} Firm1, "
               f"{len(self.firms2)} Firm2, {len(self.banks)} banks")
+        print(f"  Initial conditions: GDP≈${init_cond['D10']*init_cond['p10'] + init_cond['D20']*init_cond['p20']:.0f}, "
+              f"Wage=${init_cond['w_avg']:.2f}, CPI=${init_cond['p20']:.2f}")
+    
+    def _initialize_bank_assets(self):
+        """
+        Set up initial bank balance sheets based on firm loans
+        Banks need assets (loans) = liabilities (deposits) + equity
+        """
+        # Aggregate firm debt and deposits across all banks
+        for bank in self.banks:
+            total_loans = 0.0
+            total_deposits = 0.0
+            
+            # Sum loans and deposits from Firm1
+            for firm in self.firms1:
+                if firm.bank == bank:
+                    total_loans += firm._Deb1
+                    total_deposits += firm._NW1
+            
+            # Sum loans and deposits from Firm2
+            for firm in self.firms2:
+                if firm.bank == bank:
+                    total_loans += firm._Deb2
+                    total_deposits += firm._NW2
+            
+            # Set bank balance sheet
+            bank._LoanB = total_loans
+            bank._DepB = total_deposits
+            
+            # Compute required reserves (e.g., 10% of deposits)
+            reserve_ratio = self.config.get('Financial.rho', 0.1)
+            bank._ResB = reserve_ratio * bank._DepB
+            
+            # Adjust equity to balance: Assets = Liabilities + Equity
+            # Assets = Loans + Reserves
+            # Liabilities = Deposits
+            # Equity = Assets - Liabilities
+            bank._EqB = bank._LoanB + bank._ResB - bank._DepB
+    
+    def _initialize_employment(self):
+        """
+        Allocate initial workers to firms based on labor demand
+        Simulates an economy that's already running
+        """
+        unemployed_workers = list(self.workers)
+        get_random_engine().shuffle(unemployed_workers)
+        
+        worker_idx = 0
+        
+        # Allocate workers to Firm1 (capital-good sector)
+        for firm in self.firms1:
+            if not hasattr(firm, '_L1d'):
+                continue
+            
+            workers_needed = int(firm._L1d)
+            for _ in range(workers_needed):
+                if worker_idx >= len(unemployed_workers):
+                    break
+                
+                worker = unemployed_workers[worker_idx]
+                worker._employed = 1  # Employed in sector 1
+                worker._w = INIWAGE  # Initial wage
+                worker._Te = 0  # Initial tenure
+                firm.workers.append(worker)
+                worker_idx += 1
+        
+        # Allocate workers to Firm2 (consumption-good sector)
+        for firm in self.firms2:
+            if not hasattr(firm, '_L2d'):
+                continue
+            
+            workers_needed = int(firm._L2d)
+            for _ in range(workers_needed):
+                if worker_idx >= len(unemployed_workers):
+                    break
+                
+                worker = unemployed_workers[worker_idx]
+                worker._employed = 2  # Employed in sector 2
+                worker._w = INIWAGE  # Initial wage
+                worker._Te = 0  # Initial tenure
+                firm.workers.append(worker)
+                worker_idx += 1
+        
+        employed_count = worker_idx
+        unemployment_rate = 1.0 - (employed_count / len(self.workers))
+        print(f"    Employed: {employed_count}/{len(self.workers)} ({unemployment_rate:.1%} unemployment)")
     
     def time_step(self):
         """
