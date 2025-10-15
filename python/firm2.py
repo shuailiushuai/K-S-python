@@ -327,3 +327,130 @@ class Firm2(BaseAgent):
         c2 = self.V("_c2")
         
         return (1 + mu2) * c2
+    
+    def allocate_workers_to_vintages(self, params: Dict[str, Any], 
+                                     workers: List[BaseAgent], 
+                                     vintages: List[BaseAgent],
+                                     Lscale: float) -> int:
+        """
+        Allocate workers to vintages, prioritizing newer vintages.
+        Based on _alloc2 equation in fun_KS_firm2.h
+        
+        Args:
+            params: Model parameters
+            workers: List of Wrk2 worker bridge objects
+            vintages: List of vintage objects (ordered newest first)
+            Lscale: Labor scaling factor
+            
+        Returns:
+            Number of workers allocated (unscaled)
+        """
+        if not vintages:
+            return 0
+        
+        flagWorkerLBU = params.get('flagWorkerLBU', 0)
+        vint_learn = (flagWorkerLBU != 0 and flagWorkerLBU != 2)
+        
+        # Start with newest vintage (TOPVINT = first in list)
+        allocations = 0
+        
+        # Phase 1: Allocate unallocated workers to top vintages
+        # Go from newest to oldest
+        vint_idx = 0
+        current_vint = vintages[vint_idx] if vint_idx < len(vintages) else None
+        
+        if current_vint:
+            labor_needed = current_vint.V("__dLdVint")
+            
+            for worker_bridge in workers:
+                worker = worker_bridge.get_hook("worker")
+                if not worker:
+                    continue
+                
+                # Check if worker is unallocated (no vintage bridge)
+                if worker.get_hook("VWRK") is None:
+                    # Find vintage with open positions
+                    while labor_needed == 0 and vint_idx < len(vintages) - 1:
+                        vint_idx += 1
+                        current_vint = vintages[vint_idx]
+                        if current_vint.V("__toUseVint") == 0:
+                            # No more vintages in use
+                            break
+                        labor_needed = current_vint.V("__dLdVint")
+                    
+                    if labor_needed > 0 and current_vint:
+                        # Move worker to this vintage
+                        self.move_worker_to_vintage(worker, current_vint, vint_learn, params)
+                        allocations += 1
+                        labor_needed -= 1
+        
+        # Phase 2: Try to move workers from older to newer vintages
+        # to better utilize newer technology
+        for old_vint_idx, old_vint in enumerate(vintages):
+            # Get workers in this vintage (WrkV bridge objects)
+            old_vint_workers = old_vint.get_children("WrkV")
+            
+            for worker_bridge in old_vint_workers:
+                worker = worker_bridge.get_hook("worker")
+                if not worker:
+                    continue
+                
+                # Find newer vintage with open positions
+                vint_idx = 0
+                current_vint = vintages[vint_idx] if vint_idx < len(vintages) else None
+                
+                if current_vint:
+                    labor_needed = current_vint.V("__dLdVint")
+                    
+                    # Find vintage with open positions (newer than current)
+                    while labor_needed == 0 and vint_idx < old_vint_idx:
+                        vint_idx += 1
+                        if vint_idx >= old_vint_idx:
+                            break
+                        current_vint = vintages[vint_idx]
+                        labor_needed = current_vint.V("__dLdVint")
+                    
+                    if labor_needed > 0 and vint_idx < old_vint_idx:
+                        # Remove from old vintage
+                        worker.set_hook("VWRK", None)
+                        
+                        # Move to new vintage
+                        self.move_worker_to_vintage(worker, current_vint, vint_learn, params)
+                        allocations += 1
+        
+        return allocations
+    
+    def move_worker_to_vintage(self, worker: BaseAgent, vintage: BaseAgent, 
+                               vint_learn: bool, params: Dict[str, Any]):
+        """
+        Move a worker to a vintage.
+        Based on move_worker() in fun_KS_support.h
+        
+        Args:
+            worker: Worker agent
+            vintage: Vintage agent
+            vint_learn: Whether learning-by-vintage is active
+            params: Model parameters
+        """
+        # Determine vintage skills
+        if vint_learn:
+            # Learning by vintage - get public skills for this vintage
+            IDv = vintage.V("__IDvint")
+            # Get from country extension
+            country_ext = worker.grandparent.extensions.get('country')
+            if country_ext and IDv in country_ext.vintProd:
+                sV = country_ext.vintProd[IDv].sVp
+            else:
+                sV = INISKILL
+        else:
+            sV = INISKILL
+        
+        # Create worker-vintage bridge object
+        wrkV = BaseAgent(worker.V("_ID"), "WrkV", vintage)
+        vintage.add_child("WrkV", wrkV)
+        wrkV.set_hook("worker", worker)  # Save pointer to worker
+        worker.set_hook("VWRK", wrkV)     # Register vintage in worker
+        
+        # Set worker skills and reset cumulated production
+        worker.WRITE("_sV", sV)
+        worker.WRITE("_CQ", 0)

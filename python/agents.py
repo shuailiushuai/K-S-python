@@ -112,6 +112,19 @@ class BaseAgent:
         if 0 <= hook_id < len(self.hooks):
             self.hooks[hook_id] = target
     
+    def get_hook(self, hook_name: str) -> Optional[Any]:
+        """Get named hook pointer"""
+        # Named hooks are stored in extensions
+        if 'hooks' not in self.extensions:
+            self.extensions['hooks'] = {}
+        return self.extensions['hooks'].get(hook_name)
+    
+    def set_hook(self, hook_name: str, target: Any):
+        """Set named hook pointer"""
+        if 'hooks' not in self.extensions:
+            self.extensions['hooks'] = {}
+        self.extensions['hooks'][hook_name] = target
+    
     def add_child(self, child_type: str, child: Any):
         """Add child agent"""
         self.children[child_type].append(child)
@@ -154,6 +167,7 @@ class CountryExtension:
         # Country lists
         self.firm2wo: List[WageOffer] = []   # list of wage offers
         self.firm1appl: List[Application] = []  # sector 1 job applications
+        self.firm2appl: List[Application] = []  # sector 2 job applications
 
 
 class Firm2Extension:

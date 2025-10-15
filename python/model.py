@@ -7,7 +7,7 @@ Based on fun_KS.cpp
 from typing import Dict, List, Optional, Any
 import numpy as np
 from .random_generator import random_engine, RandomEngine
-from .agents import BaseAgent, CountryExtension, Firm2Extension
+from .agents import BaseAgent, CountryExtension, Firm2Extension, Application, WageOffer
 from .config import *
 from .worker import Worker
 from .bank import Bank
@@ -418,40 +418,410 @@ class Country(BaseAgent):
         return Ue
     
     def _workers_apply_for_jobs(self):
-        """Workers send job applications"""
-        omega = self.params.get('omega', 3)  # Applications per worker
+        """
+        Workers send job applications.
+        Based on _appl equation in fun_KS_worker.h
+        """
+        from .support_functions import Application
+        
+        # Clear previous application queues
+        ext = self.extensions['country']
+        ext.firm1appl.clear()
+        ext.firm2appl.clear()
+        
+        # Get parameters
+        omega = self.params.get('omega', 3)  # Applications for employed
+        omegaU = self.params.get('omegaU', 10)  # Applications for unemployed
+        omegaPreChg = self.params.get('omegaPreChg', omega)
+        flagSearchMode = self.params.get('flagSearchMode', 0)
+        
+        # Get firm2 weights for application targeting
+        if not ext.firm2wgtd:
+            # No firms yet
+            return
         
         for worker in self.labor_supply.get_children("Worker"):
-            # Unemployed workers apply
-            if worker.V("_employed") == 0:
-                # Send omega applications (Poisson distributed)
-                n_appl = random_engine.poisson(omega)
-                worker.WRITE("_appl", n_appl)
+            employed = worker.V("_employed")
+            
+            # Determine max applications
+            if employed == 0:
+                max_appl = omegaU
+            elif employed == 2:
+                # Check if employer is post-change
+                employer = worker.get_hook("FWRK")
+                if employer and employer.V("_postChg"):
+                    max_appl = omega
+                else:
+                    max_appl = omegaPreChg
+            else:
+                max_appl = omegaPreChg
+            
+            if max_appl == 0:
+                worker.WRITE("_discouraged", 0)
+                worker.WRITE("_appl", 0)
+                continue
+            
+            # Apply search mode
+            searchProb = worker.V("_searchProb")
+            effective_appl = searchProb * max_appl
+            
+            if flagSearchMode == 1:
+                # Search only if unemployed
+                if employed > 0:
+                    effective_appl = 0
+            elif flagSearchMode == 2:
+                # Search if wage below average
+                if employed > 0:
+                    w2oAvg = ext.conSec.VL("w2oAvg", 1) if hasattr(ext.conSec, 'w2oAvg') else INIWAGE
+                    if worker.VL("_w", 1) >= w2oAvg:
+                        effective_appl = 0
+            
+            # Handle fractional applications probabilistically
+            if 0 < effective_appl < 1:
+                n_appl = 1 if random_engine.uniform(0, 1) < effective_appl else 0
+            else:
+                n_appl = int(effective_appl)
+            
+            # Mark discouraged workers
+            if employed == 0 and n_appl <= 0:
+                worker.WRITE("_discouraged", 1)
+            else:
+                worker.WRITE("_discouraged", 0)
+            
+            worker.WRITE("_appl", n_appl)
+            
+            if n_appl <= 0:
+                continue
+            
+            # Select target firms (sector 2 for now)
+            n_firms = len(ext.firm2ptr)
+            if n_firms == 0:
+                continue
+            
+            # Don't apply to current employer
+            employer = worker.get_hook("FWRK") if employed == 2 else None
+            
+            # Limit applications to available firms
+            n_appl = min(n_appl, n_firms - (1 if employer else 0))
+            
+            # Select firms proportional to market share
+            target_firms = set()
+            iterations = 0
+            while len(target_firms) < n_appl and iterations < n_firms * 2:
+                # Draw firm proportional to cumulative market share
+                r = random_engine.uniform(0, 1)
                 
-                # Apply to random firms (simplified - would use proper selection)
-                # This would be implemented fully with application queues
+                # Find firm at this cumulative position
+                firm_idx = 0
+                for i, cum_share in enumerate(ext.firm2wgtd):
+                    if r <= cum_share:
+                        firm_idx = i
+                        break
+                
+                target_firm = ext.firm2ptr[firm_idx]
+                
+                # Don't apply to employer
+                if target_firm != employer and target_firm is not None:
+                    target_firms.add(target_firm)
+                
+                iterations += 1
+            
+            # Create applications
+            wR = worker.V("_wR")  # Wage request
+            s = worker.V("_s")    # Skills
+            Te = worker.V("_Te")  # Tenure
+            
+            for firm in target_firms:
+                appl = Application(
+                    w=wR,
+                    s=s,
+                    ws=wR / s if s > 0 else wR,
+                    Te=Te,
+                    wrk=worker
+                )
+                
+                # Add to firm's application queue
+                firm_ext = firm.extensions.get('firm2')
+                if firm_ext:
+                    firm_ext.appl.append(appl)
+                
+                # Also add to sector-wide queue for sector 2
+                ext.firm2appl.append(appl)
     
     def _firms_post_vacancies(self):
-        """Firms post wage offers and vacancies"""
-        # Firm1 vacancies
+        """
+        Firms post wage offers and vacancies.
+        Based on _JO1, _JO2, and _w2o equations.
+        """
+        from .support_functions import WageOffer
+        
+        ext = self.extensions['country']
+        ext.firm2wo.clear()
+        
+        # Capital sector (Firm1) vacancies
         for firm in self.capital_sector.get_children("Firm1"):
             L1d = firm.V("_L1d")
-            L1 = firm.V("_L1")
+            L1 = firm.V("_L1")  # Current workers
             JO1 = max(0, L1d - L1)
             firm.WRITE("_JO1", JO1)
         
-        # Firm2 vacancies
+        # Consumption sector (Firm2) vacancies and wage offers
         for firm in self.consumption_sector.get_children("Firm2"):
             L2d = firm.V("_L2d")
-            L2 = firm.V("_L2")
+            L2 = firm.V("_L2")  # Current workers (scaled)
+            
+            # Count actual workers
+            Lscale = self.params.get('Lscale', 1.0)
+            L2_count = L2 / Lscale if Lscale > 0 else 0
+            
             JO2 = max(0, L2d - L2)
             firm.WRITE("_JO2", JO2)
+            
+            # Compute wage offer (_w2o equation)
+            wage_offer = self._compute_firm2_wage_offer(firm)
+            firm.WRITE("_w2o", wage_offer)
+            
+            # Add to wage offer list
+            wo = WageOffer(
+                offer=wage_offer,
+                workers=int(L2_count),
+                firm=firm
+            )
+            ext.firm2wo.append(wo)
+    
+    def _compute_firm2_wage_offer(self, firm: BaseAgent) -> float:
+        """
+        Compute wage offer for Firm2.
+        Based on _w2o equation in fun_KS_firm2.h
+        """
+        ext = self.extensions['country']
+        
+        # Get parameters
+        flagHeterWage = self.params.get('flagHeterWage', 1)
+        flagWageOffer = self.params.get('flagWageOffer', 2)
+        flagWageOfferChg = self.params.get('flagWageOfferChg', flagWageOffer)
+        wMinPol = self.params.get('wMinPol', 0)
+        wU = self.labor_supply.V("wU") if hasattr(self.labor_supply, 'wU') else INIWAGE
+        psi1 = self.params.get('psi1', 0.05)
+        psi2 = self.params.get('psi2', 0.01)
+        psi3 = self.params.get('psi3', 0.10)
+        omicronMax = self.params.get('omicronMax', 10.0)
+        
+        # Check if firm is post-change type
+        postChg = firm.V("_postChg") if hasattr(firm, '_postChg') else False
+        flagOffer = flagWageOfferChg if postChg else flagWageOffer
+        
+        # Current wage offer
+        w2o_prev = firm.VL("_w2o", 1) if hasattr(firm, '_w2o') else INIWAGE
+        
+        # Mode-specific wage determination
+        if flagHeterWage == 0:
+            # Homogeneous wages - use previous or initial
+            wage = w2o_prev
+        elif flagOffer == 0:
+            # Keep current wage
+            wage = w2o_prev
+        elif flagOffer == 1:
+            # Average of last period wages
+            L2 = firm.VL("_L2", 1)
+            if L2 > 0:
+                W2 = firm.VL("_W2", 1)
+                wage = W2 / L2 if L2 > 0 else w2o_prev
+            else:
+                wage = w2o_prev
+        elif flagOffer == 2:
+            # Queue-based: highest wage in queue
+            firm_ext = firm.extensions.get('firm2')
+            if firm_ext and firm_ext.appl:
+                # Get max wage from applications
+                max_w = max(a.w for a in firm_ext.appl)
+                wage = max_w
+            else:
+                wage = w2o_prev
+        else:
+            wage = w2o_prev
+        
+        # Adjust for market conditions
+        JO2_prev = firm.VL("_JO2", 1) if hasattr(firm, '_JO2') else 0
+        if JO2_prev > 0:
+            # Had unfilled positions - increase wage
+            wage *= (1 + psi1)
+        
+        # Check affordability (can't pay more than productivity * price)
+        p2 = firm.VL("_p2", 1) if hasattr(firm, '_p2') else 1.0
+        A2 = firm.VL("_A2", 1) if hasattr(firm, '_A2') else INIPROD
+        max_wage = p2 * A2
+        
+        if max_wage > 0 and wage > max_wage:
+            wage = max_wage
+        elif max_wage <= 0:
+            wage = min(wage, w2o_prev)
+        
+        # Can't be below minimum wage or unemployment benefit
+        wage = max(wage, max(wU, wMinPol))
+        
+        # Prevent explosive changes
+        if w2o_prev > 0:
+            ratio = wage / w2o_prev
+            if ratio > omicronMax:
+                wage = w2o_prev * omicronMax
+            elif ratio < 1 / omicronMax:
+                wage = w2o_prev / omicronMax
+        
+        return wage
     
     def _match_workers_to_firms(self):
-        """Match worker applications to firm vacancies"""
-        # Simplified matching - full implementation would use
-        # the application queues and worker ranking
-        pass
+        """
+        Match worker applications to firm vacancies.
+        Implements hires1 and hires2 equations from fun_KS_capital.h and fun_KS_consumption.h
+        """
+        from .support_functions import order_applications, order_offers, hire_worker_full
+        
+        ext = self.extensions['country']
+        Lscale = self.params.get('Lscale', 1.0)
+        
+        # First, capital sector hires (hires1)
+        self._hires_sector1(ext, Lscale)
+        
+        # Then, consumption sector hires (hires2)
+        self._hires_sector2(ext, Lscale)
+    
+    def _hires_sector1(self, ext, Lscale: float):
+        """
+        Capital sector hiring.
+        Based on hires1 equation in fun_KS_capital.h
+        """
+        from .support_functions import order_applications, hire_worker_full
+        
+        # Get total open jobs in sector 1
+        JO1_total = sum(firm.V("_JO1") for firm in self.capital_sector.get_children("Firm1"))
+        if JO1_total <= 0:
+            self.capital_sector.WRITE("hires1", 0)
+            return
+        
+        # Get top wage offered in sector 2 (for comparison)
+        w2oMax = 0
+        for firm in self.consumption_sector.get_children("Firm2"):
+            w2o = firm.V("_w2o") if hasattr(firm, '_w2o') else INIWAGE
+            w2oMax = max(w2oMax, w2o)
+        
+        # Sort applications according to flagHireOrder1
+        flagHireOrder1 = self.params.get('flagHireOrder1', 0)
+        order_applications(flagHireOrder1, ext.firm1appl)
+        
+        # Hire workers from ordered queue
+        hired = 0
+        scaled_jobs = int(JO1_total / Lscale) if Lscale > 0 else 0
+        
+        i = 0
+        while i < len(ext.firm1appl) and hired < scaled_jobs:
+            appl = ext.firm1appl[i]
+            
+            # Check if wage request is acceptable (within 1% of max offer)
+            if appl.w <= w2oMax * 1.01:
+                # Hire worker
+                if hire_worker_full(appl.wrk, 1, self.capital_sector, w2oMax, ext):
+                    hired += 1
+            
+            i += 1
+        
+        # Clear application queue
+        ext.firm1appl.clear()
+        
+        # Record hires (unscaled)
+        self.capital_sector.WRITE("hires1", hired * Lscale)
+    
+    def _hires_sector2(self, ext, Lscale: float):
+        """
+        Consumption sector hiring.
+        Based on hires2 equation in fun_KS_consumption.h
+        """
+        from .support_functions import order_applications, order_offers, hire_worker_full
+        
+        # Get hiring parameters
+        flagHeterWage = self.params.get('flagHeterWage', 1)
+        flagHireSeq = self.params.get('flagHireSeq', 0) if flagHeterWage != 0 else 0
+        flagHireOrder2 = self.params.get('flagHireOrder2', 0)
+        flagHireOrder2Chg = self.params.get('flagHireOrder2Chg', flagHireOrder2)
+        flagWageOffer = self.params.get('flagWageOffer', 2)
+        flagWageOfferChg = self.params.get('flagWageOfferChg', flagWageOffer)
+        
+        # Sort wage offers according to hiring sequence
+        order_offers(flagHireSeq, ext.firm2wo)
+        
+        # Each firm hires from its application queue
+        total_hired = 0
+        
+        for wo in ext.firm2wo:
+            firm = wo.firm
+            firm_ext = firm.extensions.get('firm2')
+            if not firm_ext:
+                continue
+            
+            # Get firm's application queue
+            appl_queue = firm_ext.appl
+            
+            # Sort applications if needed
+            postChg = firm.V("_postChg") if hasattr(firm, '_postChg') else False
+            flagOffer = flagWageOfferChg if postChg else flagWageOffer
+            
+            if flagHeterWage == 0 or flagOffer == 0:
+                # Don't re-sort applications
+                pass
+            else:
+                # Sort firm's applications
+                order_mode = flagHireOrder2Chg if postChg else flagHireOrder2
+                order_applications(order_mode, appl_queue)
+            
+            # Hire workers
+            JO2 = firm.V("_JO2")
+            scaled_jobs = int(JO2 / Lscale) if Lscale > 0 else 0
+            firm_hired = 0
+            
+            # Track minimum wage request for fallback hiring
+            min_wage_worker = None
+            min_wage = float('inf')
+            
+            i = 0
+            while i < len(appl_queue) and firm_hired < scaled_jobs:
+                appl = appl_queue[i]
+                
+                # Check if worker is not already hired this period
+                already_hired = (appl.wrk.V("_employed") > 0 and 
+                               appl.wrk.V("_Te") == 0)
+                
+                if not already_hired:
+                    # Check if wage request is acceptable
+                    if appl.w <= wo.offer * 1.01:  # 1% tolerance
+                        # Hire worker
+                        if hire_worker_full(appl.wrk, 2, firm, wo.offer, ext):
+                            firm_hired += 1
+                    else:
+                        # Track for fallback
+                        if appl.w < min_wage:
+                            min_wage = appl.w
+                            min_wage_worker = appl.wrk
+                
+                i += 1
+            
+            # Try to hire at least one worker at any wage
+            if firm_hired == 0 and scaled_jobs > 0 and min_wage_worker:
+                hire_worker_full(min_wage_worker, 2, firm, min_wage, ext)
+                firm_hired = 1
+            
+            # Update firm's hire count
+            firm.WRITE("_hires2", firm_hired * Lscale)
+            total_hired += firm_hired
+            
+            # Clear firm's application queue
+            appl_queue.clear()
+        
+        # Clear sector-wide queues
+        ext.firm2wo.clear()
+        ext.firm2appl.clear()
+        
+        # Record total hires
+        self.consumption_sector.WRITE("hires2", total_hired * Lscale)
     
     def _production(self):
         """Production based on hired labor"""
