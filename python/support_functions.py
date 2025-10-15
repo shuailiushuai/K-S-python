@@ -4,10 +4,11 @@ Helper functions for firm operations, worker management, and market interactions
 Based on fun_KS_support.h
 """
 
-from typing import Optional, Dict, Any, List
-from .agents import BaseAgent
+from typing import Optional, Dict, Any, List, Tuple
+from .agents import BaseAgent, Application, WageOffer
 from .config import *
 from .random_generator import random_engine
+import random
 
 
 def set_bank(firm: BaseAgent, banks: List[BaseAgent], bank_weights: List[float]) -> BaseAgent:
@@ -299,6 +300,181 @@ def exit_firm(firm: BaseAgent, sector: BaseAgent) -> float:
     
     # Get firm workers (would need worker list)
     # for worker in firm_workers:
+    #     fire_worker(worker)
+    #     workers_fired += 1
+    
+    return workers_fired
+
+
+def order_applications(order_mode: int, applications: List[Application]):
+    """
+    Sort worker applications according to specified order.
+    Based on order_applications() in fun_KS_support.h
+    
+    Args:
+        order_mode: Ordering strategy
+            0 = random order
+            1 = higher wage workers first
+            2 = lower wage workers first
+            3 = higher skills workers first
+            4 = lower skills workers first
+            5 = higher payback period workers first (w/s high)
+            6 = lower payback period workers first (w/s low)
+            7 = old hired workers first
+            8 = recent hired workers first
+        applications: List of applications to sort (modified in place)
+    """
+    if not applications:
+        return
+    
+    if order_mode == 0:
+        # Random order - shuffle
+        random.shuffle(applications)
+    elif order_mode == 1:
+        # Higher wage first
+        applications.sort(key=lambda a: a.w, reverse=True)
+    elif order_mode == 2:
+        # Lower wage first
+        applications.sort(key=lambda a: a.w)
+    elif order_mode == 3:
+        # Higher skills first
+        applications.sort(key=lambda a: a.s, reverse=True)
+    elif order_mode == 4:
+        # Lower skills first
+        applications.sort(key=lambda a: a.s)
+    elif order_mode == 5:
+        # Higher payback (w/s ratio) first
+        applications.sort(key=lambda a: a.ws, reverse=True)
+    elif order_mode == 6:
+        # Lower payback (w/s ratio) first
+        applications.sort(key=lambda a: a.ws)
+    elif order_mode == 7:
+        # Old hired workers first (higher Te)
+        applications.sort(key=lambda a: a.Te, reverse=True)
+    elif order_mode == 8:
+        # Recent hired workers first (lower Te)
+        applications.sort(key=lambda a: a.Te)
+
+
+def shuffle_offers(offers: List[WageOffer]):
+    """Shuffle wage offers to break ties randomly"""
+    random.shuffle(offers)
+
+
+def order_offers(order_mode: int, offers: List[WageOffer]):
+    """
+    Sort wage offers according to specified order.
+    Based on order_offers() in fun_KS_support.h
+    
+    Args:
+        order_mode: Ordering strategy
+            0 = random order
+            1 = higher offers first
+            2 = firms without workers hire first, then random
+            3 = firms without workers hire first, then higher offers
+        offers: List of offers to sort (modified in place)
+    """
+    if not offers:
+        return
+    
+    # Always shuffle first to break ties randomly
+    shuffle_offers(offers)
+    
+    if order_mode == 0:
+        # Random order (already shuffled)
+        pass
+    elif order_mode == 1:
+        # Higher offers first
+        offers.sort(key=lambda o: o.offer, reverse=True)
+    elif order_mode == 2 or order_mode == 3:
+        # First sort all by number of workers (ascending)
+        offers.sort(key=lambda o: o.workers)
+        
+        # For mode 3, additionally sort firms with workers by offer
+        if order_mode == 3:
+            # Find first firm with workers
+            first_with_workers = 0
+            for i, offer in enumerate(offers):
+                if offer.workers > 0:
+                    first_with_workers = i
+                    break
+            
+            # Sort firms with workers by offer (descending)
+            if first_with_workers < len(offers):
+                offers[first_with_workers:] = sorted(
+                    offers[first_with_workers:],
+                    key=lambda o: o.offer,
+                    reverse=True
+                )
+
+
+def hire_worker_full(worker: BaseAgent, sector: int, firm: BaseAgent, 
+                     wage: float, country_ext) -> bool:
+    """
+    Hire a worker for a firm with full bookkeeping.
+    Based on hire_worker() in fun_KS_support.h
+    
+    Args:
+        worker: Worker agent
+        sector: 1 or 2
+        firm: Employing firm
+        wage: Wage to pay
+        country_ext: Country extension with sector references
+        
+    Returns:
+        True if hired successfully
+    """
+    _employed = worker.V("_employed")
+    
+    # If already employed, must quit first
+    if _employed > 0:
+        Lscale = worker.parent.V("Lscale")
+        
+        if _employed == 1:
+            # Was in sector 1
+            country_ext.capSec.INCR("quits1", Lscale)
+        else:
+            # Was in sector 2
+            old_firm = worker.get_hook("FWRK")
+            if old_firm:
+                old_firm.INCR("_quits2", Lscale)
+        
+        # Fire from old job
+        fire_worker_full(worker)
+    
+    # Set new employment
+    worker.WRITE("_employed", sector)
+    worker.WRITE("_Te", 0)  # Reset tenure
+    worker.WRITE("_CQ", 0)  # Reset cumulated production
+    worker.WRITE("_w", wage)  # Set wage
+    
+    # Create worker-firm bridge
+    worker.set_hook("FWRK", firm)
+    
+    # Handle skills for learning modes
+    flagWorkerLBU = worker.grandparent.V("flagWorkerLBU")
+    if flagWorkerLBU != 0 and flagWorkerLBU != 2:
+        # Learning by vintage mode - set public skills
+        sigma = worker.parent.V("sigma")
+        worker.WRITE("_sV", sigma)
+    
+    return True
+
+
+def fire_worker_full(worker: BaseAgent):
+    """
+    Fire a worker with full bookkeeping.
+    Based on fire_worker() in fun_KS_support.h
+    
+    Args:
+        worker: Worker to fire
+    """
+    worker.WRITE("_employed", 0)
+    worker.WRITE("_Te", 0)
+    
+    # Remove firm bridge
+    worker.set_hook("FWRK", None)
+    worker.set_hook("VWRK", None)  # Remove vintage bridge too
     #     fire_worker(worker)
     #     workers_fired += 1
     

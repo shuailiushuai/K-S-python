@@ -154,6 +154,7 @@ class CountryExtension:
         # Country lists
         self.firm2wo: List[WageOffer] = []   # list of wage offers
         self.firm1appl: List[Application] = []  # sector 1 job applications
+        self.firm2appl: List[Application] = []  # sector 2 job applications
 
 
 class Firm2Extension:
