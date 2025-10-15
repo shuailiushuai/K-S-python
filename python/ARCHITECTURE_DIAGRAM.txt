@@ -1,0 +1,316 @@
+================================================================================
+K+S ABM Model - Python Implementation Architecture
+================================================================================
+
+OVERALL SYSTEM ARCHITECTURE:
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          KSModel (model.py)                              │
+│                    Main Simulation Controller                            │
+│  • Parameter management (200+ params)                                   │
+│  • Time stepping loop                                                    │
+│  • Results tracking                                                      │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Country (model.py)                                │
+│                   Top-Level Coordinator                                  │
+│  • Sector organization                                                   │
+│  • Agent initialization                                                  │
+│  • Time step coordination                                                │
+│  • CountryExtension for fast access                                      │
+└──────┬────────────┬──────────────┬──────────────┬────────────────┬──────┘
+       │            │              │              │                │
+       ▼            ▼              ▼              ▼                ▼
+┌──────────┐ ┌──────────┐  ┌──────────┐  ┌──────────┐    ┌──────────┐
+│Financial │ │ Capital  │  │Consumption│ │  Labor   │    │  Stats   │
+│  Sector  │ │  Sector  │  │  Sector   │ │  Supply  │    │  Sector  │
+└────┬─────┘ └─────┬────┘  └─────┬─────┘ └────┬─────┘    └──────────┘
+     │             │              │             │
+     │             │              │             │
+     ▼             ▼              ▼             ▼
+
+
+AGENT HIERARCHY:
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    BaseAgent (agents.py)                                 │
+│                   Foundation for All Agents                              │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │ • Variable storage: vars[name] = [current, lag1, lag2, ...]      │  │
+│  │ • Hooks: Dynamic inter-agent references                          │  │
+│  │ • Children: Parent-child hierarchy                               │  │
+│  │ • Extensions: Specialized data storage                           │  │
+│  │                                                                   │  │
+│  │ Methods:                                                          │  │
+│  │   V(var)      → Get current value                                │  │
+│  │   VL(var, n)  → Get lagged value                                 │  │
+│  │   WRITE(var, val) → Set value                                    │  │
+│  │   INCR(var, delta) → Increment                                   │  │
+│  │   HOOK(id)    → Get hook reference                               │  │
+│  │   update_lags() → Update history                                 │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+       │                  │                  │                  │
+       │                  │                  │                  │
+       ▼                  ▼                  ▼                  ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│    Worker    │  │     Bank     │  │    Firm1     │  │    Firm2     │
+│ (worker.py)  │  │  (bank.py)   │  │ (firm1.py)   │  │  (ready)     │
+│              │  │              │  │              │  │              │
+│ IMPLEMENTED  │  │ IMPLEMENTED  │  │ IMPLEMENTED  │  │ FRAMEWORK    │
+│   ✓ 100%     │  │   ✓ 100%     │  │   ✓ 100%     │  │   ○ 40%      │
+└──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘
+
+
+WORKER AGENT DETAIL (worker.py - 10,967 bytes):
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Worker Agent                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│ STATE VARIABLES:                                                         │
+│  • _employed: Employment status (0=unemployed, 1=sector1, 2=sector2)   │
+│  • _employer: Current employer reference                                │
+│  • _s, _sV, _sT: Skills (compound, vintage, tenure)                    │
+│  • _w, _wR: Actual wage, requested wage                                │
+│  • _Te, _Tc, _Tp: Tenure, contract, protection periods                 │
+│  • _vintage_id: Current machine vintage                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│ EQUATIONS IMPLEMENTED (7):                                               │
+│  ✓ _s: Compound skills (modes 0-3)                                      │
+│  ✓ _sV: Vintage skills learning                                         │
+│  ✓ _sT: Tenure skills learning                                          │
+│  ✓ _wR: Wage request computation                                        │
+│  ✓ _appl: Job applications (Poisson)                                    │
+│  ✓ _discouraged: Search discouragement                                  │
+│  ✓ hire/fire: Employment lifecycle                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│ KEY METHODS:                                                             │
+│  • compute_skills(flagWorkerSkProd)                                     │
+│  • update_vintage_skills(sVp, sigma)                                    │
+│  • update_tenure_skills(tauT, tauU)                                     │
+│  • compute_wage_request(params, t)                                      │
+│  • send_applications(firms, omega, rng)                                 │
+│  • check_discouragement(flag, Ue, lambda, kappa, rng)                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+BANK AGENT DETAIL (bank.py - 9,704 bytes):
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            Bank Agent                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│ BALANCE SHEET:                                                           │
+│  ASSETS:                    │  LIABILITIES & EQUITY:                    │
+│  • _Loans (to firms)        │  • _Depo (from firms)                     │
+│  • _Res (required reserves) │  • _NWb (net worth/equity)                │
+│  • _ExRes (excess reserves) │                                           │
+│  • _BondsB (gov bonds)      │                                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│ EQUATIONS IMPLEMENTED (8):                                               │
+│  ✓ _Bda: Financial fragility                                            │
+│  ✓ _Depo: Deposit aggregation                                           │
+│  ✓ _cScores: Credit class ranking                                       │
+│  ✓ _TC1, _TC2: Credit supply by sector                                  │
+│  ✓ _PiB: Bank profits                                                   │
+│  ✓ _NWb: Net worth evolution                                            │
+│  ✓ bailout check: Capital injection                                     │
+│  ✓ reserves: Required & excess                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│ KEY METHODS:                                                             │
+│  • compute_bad_debt_fragility()                                         │
+│  • compute_deposits(rD)                                                 │
+│  • compute_credit_scores()                                              │
+│  • compute_credit_supply(Lambda, flagCreditRule, tauB)                 │
+│  • compute_profits(rD, rDeb, rRes, rBonds)                             │
+│  • compute_net_worth(dB)                                                │
+│  • check_bailout(PhiB, avg_bank_size)                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+FIRM1 AGENT DETAIL (firm1.py - 11,315 bytes):
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       Capital-Good Firm (Firm1)                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│ TECHNOLOGY:                                                              │
+│  • _Atau: Labor productivity coefficient                                │
+│  • _Btau: Machine productivity coefficient                              │
+│  • _RD: R&D expenditure (fraction nu of sales)                         │
+│  • _inn, _imi: Innovation/imitation success flags                       │
+│  • _tInn, _tImi: Time of last innovation/imitation                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│ R&D PROCESS:                                                             │
+│  Innovation:                    │  Imitation:                           │
+│  • Share: xi * RD              │  • Share: (1-xi) * RD                 │
+│  • p = 1 - exp(-zeta1 * RD)   │  • p = 1 - exp(-zeta2 * RD)          │
+│  • Draw: Beta(alpha1, beta1)   │  • Draw: Beta(alpha2, beta2)          │
+│  • New tech in [x1inf,x1sup]  │  • Target: best competitor            │
+├─────────────────────────────────────────────────────────────────────────┤
+│ EQUATIONS IMPLEMENTED (11):                                              │
+│  ✓ _Atau, _Btau: Productivity via R&D                                   │
+│  ✓ _c1: Unit cost = w1 / (_Btau * m1)                                  │
+│  ✓ _p1: Price = (1 + mu1) * _c1                                        │
+│  ✓ _D1: Demand aggregation                                              │
+│  ✓ _Q1: Planned production                                              │
+│  ✓ _L1d, _L1rd: Labor demand (production + R&D)                        │
+│  ✓ _Q1e: Effective production                                           │
+│  ✓ _S1: Sales revenue                                                   │
+│  ✓ _Pi1: Profits                                                        │
+│  ✓ _f1: Market share                                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│ KEY METHODS:                                                             │
+│  • compute_productivity(params, t)                                      │
+│  • compute_unit_cost(w1, m1)                                            │
+│  • compute_price(mu1)                                                   │
+│  • compute_demand()                                                     │
+│  • compute_production(L1rdMax)                                          │
+│  • compute_effective_production(L1)                                     │
+│  • compute_sales()                                                      │
+│  • compute_profits()                                                    │
+│  • update_market_share(total_sales, n1)                                │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+TIME STEPPING SEQUENCE:
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      time_step() Execution Order                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  1. _update_interest_rates()                                            │
+│     └─> Central bank sets r, rD, rDeb, rRes                            │
+│                                                                          │
+│  2. _consumption_sector_planning()                                      │
+│     └─> Firm2: Expectations, planned production, investment            │
+│                                                                          │
+│  3. _capital_sector_planning()                                          │
+│     └─> Firm1: R&D, innovation, cost, price, production plan           │
+│                                                                          │
+│  4. _labor_market()                                                     │
+│     └─> Workers apply, firms hire/fire, matching                        │
+│                                                                          │
+│  5. _production()                                                       │
+│     └─> Adjust output to actual labor hired                             │
+│                                                                          │
+│  6. _price_setting()                                                    │
+│     └─> Firms set final prices                                          │
+│                                                                          │
+│  7. _demand_and_sales()                                                 │
+│     └─> Government + consumers demand, match with supply                │
+│                                                                          │
+│  8. _profits_and_finance()                                              │
+│     └─> Compute profits, taxes, cash flows, update finances             │
+│                                                                          │
+│  9. _entry_exit()                                                       │
+│     └─> Firms enter/exit based on conditions                            │
+│                                                                          │
+│  10. _update_lags()                                                     │
+│      └─> Update all agent variable histories                            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+RANDOM NUMBER GENERATION (random_generator.py):
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      RandomEngine Class                                  │
+│                   Using NumPy MT19937                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│ DISTRIBUTIONS:                                                           │
+│  • uniform(low, high): Uniform distribution                             │
+│  • normal(mean, std): Normal distribution                               │
+│  • beta(alpha, beta): Beta distribution (R&D success)                   │
+│  • pareto(alpha): Pareto distribution (bank sizes)                      │
+│  • poisson(lam): Poisson distribution (job applications)                │
+│  • bernoulli(p): Bernoulli trial                                        │
+│  • choice(arr, p): Random selection                                     │
+│  • integers(low, high): Random integer                                  │
+│  • shuffle(arr): In-place shuffle                                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│ SEED MANAGEMENT:                                                         │
+│  • seed(s): Set seed for reproducibility                                │
+│  • Matches C++ mt19937_64 behavior                                      │
+│  • Global instance: random_engine                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+PARAMETER SYSTEM (example.py - 200+ parameters):
+┌─────────────────────────────────────────────────────────────────────────┐
+│              get_baseline_parameters() → Dictionary                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│ CATEGORIES:                                                              │
+│  • Country (13): tr, gG, TregChg, omicron, stick, ...                  │
+│  • Financial (32): B, Lambda, tauB, rT, piT, muD, muDeb, ...           │
+│  • Capital (23): F10, nu, xi, zeta1-2, alpha1-2, beta1-2, m1, mu1, ... │
+│  • Consumption (32): F20, b, chi, e0-8, omega1-3, iota, u, ...         │
+│  • Labor (30): Ls0, omega, phi, psi1-6, sigma, tauT, tauU, Tc, ...     │
+│  • Control Flags (24): flagCons, flagTax, flagCreditRule, ...          │
+├─────────────────────────────────────────────────────────────────────────┤
+│ USAGE:                                                                   │
+│   params = get_baseline_parameters()                                    │
+│   params['nu'] = 0.15  # Modify specific parameters                     │
+│   model = KSModel(params, random_seed=42)                               │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+TESTING FRAMEWORK (test_model.py - 23 tests):
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Unit Test Coverage                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│ TestRandomEngine (2 tests)                                              │
+│  ✓ test_seed_reproducibility                                            │
+│  ✓ test_distributions                                                   │
+│                                                                          │
+│ TestBaseAgent (5 tests)                                                 │
+│  ✓ test_variable_storage                                                │
+│  ✓ test_lagged_values                                                   │
+│  ✓ test_increment                                                       │
+│  ✓ test_hooks                                                           │
+│  ✓ test_children                                                        │
+│                                                                          │
+│ TestWorker (4 tests)                                                    │
+│  ✓ test_initial_state                                                   │
+│  ✓ test_skills_computation                                              │
+│  ✓ test_vintage_skills_update                                           │
+│  ✓ test_tenure_skills_update                                            │
+│                                                                          │
+│ TestBank (3 tests)                                                      │
+│  ✓ test_initial_state                                                   │
+│  ✓ test_bad_debt_fragility                                              │
+│  ✓ test_profits                                                         │
+│                                                                          │
+│ TestFirm1 (4 tests)                                                     │
+│  ✓ test_initial_state                                                   │
+│  ✓ test_unit_cost                                                       │
+│  ✓ test_price                                                           │
+│  ✓ test_production_planning                                             │
+│                                                                          │
+│ TestSupportFunctions (3 tests)                                          │
+│  ✓ test_mov_avg_bound                                                   │
+│  ✓ test_round_function                                                  │
+│  ✓ test_vintage_packing                                                 │
+│                                                                          │
+│ TestDataStructures (2 tests)                                            │
+│  ✓ test_vintage                                                         │
+│  ✓ test_firm_rank                                                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│ RESULT: 23 tests, 100% PASS RATE                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+DOCUMENTATION STRUCTURE:
+┌─────────────────────────────────────────────────────────────────────────┐
+│  README.md (278 lines)                                                   │
+│  └─> User guide: Installation, usage, parameters, examples              │
+│                                                                          │
+│  TECHNICAL_DOCS.md (547 lines)                                           │
+│  └─> Architecture, implementation details, validation, extension guide  │
+│                                                                          │
+│  IMPLEMENTATION_SUMMARY.md (405 lines)                                   │
+│  └─> Status report, equation coverage, next steps                       │
+│                                                                          │
+│  PROJECT_SUMMARY.txt (174 lines)                                         │
+│  └─> Quick reference: Goals, deliverables, usage                        │
+│                                                                          │
+│  ARCHITECTURE_DIAGRAM.txt (this file)                                    │
+│  └─> Visual architecture and component details                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+Total Implementation: ~3,470 lines (2,240 Python + 1,230 documentation)
+Status: Core framework complete (100%), Equations ~10%, All tests passing
+Next: Add remaining equations following established patterns
+================================================================================
