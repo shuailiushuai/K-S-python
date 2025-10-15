@@ -14,6 +14,7 @@ from .bank import Bank
 from .firm1 import Firm1
 from .firm2 import Firm2
 from .vintage import Vint, create_vintage
+from . import statistics as stats_module
 
 
 class Country(BaseAgent):
@@ -128,6 +129,7 @@ class Country(BaseAgent):
         F10 = int(self.params.get('F10', 20))  # Initial number of firms
         NW10 = self.params.get('NW10', 1.0)
         mu1 = self.params.get('mu1', 0.25)
+        L10 = self.params.get('L10', 10)  # Initial workers per firm
         
         for i in range(F10):
             firm = Firm1(i + 1, self.capital_sector)
@@ -153,6 +155,13 @@ class Country(BaseAgent):
             firm._mu1 = mu1
             firm.WRITE("_c1", firm._c1)
             firm.WRITE("_p1", firm._p1)
+            firm.WRITE("_w1", INIWAGE)
+            
+            # Initial labor
+            firm._L1 = L10
+            firm._L1d = L10
+            firm.WRITE("_L1", L10)
+            firm.WRITE("_L1d", L10)
             
             # Initial market share (uniform)
             firm._f1 = 1.0 / F10
@@ -171,6 +180,7 @@ class Country(BaseAgent):
         NW20 = self.params.get('NW20', 1.0)
         mu20 = self.params.get('mu20', 0.25)
         K0 = self.params.get('K0', 10.0)  # Initial capital per firm
+        L20 = self.params.get('L20', 5)  # Initial workers per firm
         
         ext = self.extensions['country']
         
@@ -200,6 +210,12 @@ class Country(BaseAgent):
             # Initial capital stock
             firm._K = K0
             firm.WRITE("_K", K0)
+            
+            # Initial labor
+            firm._L2 = L20
+            firm._L2d = L20
+            firm.WRITE("_L2", L20)
+            firm.WRITE("_L2d", L20)
             
             # Assign to bank
             bank_id = random_engine.integers(0, len(ext.bankPtr))
@@ -254,6 +270,14 @@ class Country(BaseAgent):
         self.WRITE("Tax", 0.0)
         self.WRITE("Deb", 0.0)
         self.WRITE("Def", 0.0)
+        self.WRITE("Inflation", 0.0)
+        self.WRITE("priceIndex", 1.0)
+        
+        # Initialize sector statistics
+        self.stats.WRITE("HH1", 0.0)
+        self.stats.WRITE("HH2", 0.0)
+        self.stats.WRITE("AtauAvg", INIPROD)
+        self.stats.WRITE("BtauAvg", INIPROD)
     
     def time_step(self):
         """
@@ -289,7 +313,10 @@ class Country(BaseAgent):
         # 9. Entry and exit
         self._entry_exit()
         
-        # 10. Update all lagged variables
+        # 10. Compute statistics
+        self._compute_statistics()
+        
+        # 11. Update all lagged variables
         self._update_lags()
         
         return self.t
@@ -342,12 +369,138 @@ class Country(BaseAgent):
     
     def _labor_market(self):
         """Labor market matching"""
-        # Simplified - actual implementation has complex search and matching
+        # Compute unemployment and employment statistics
+        self.compute_unemployment()
+        
+        # Workers search for jobs
+        self._workers_apply_for_jobs()
+        
+        # Firms post vacancies and wages
+        self._firms_post_vacancies()
+        
+        # Match workers to firms
+        self._match_workers_to_firms()
+    
+    def compute_unemployment(self):
+        """
+        Compute unemployment rate and related statistics.
+        Based on fun_KS_labor.h Ue equation.
+        """
+        Lscale = self.params.get('Lscale', 1.0)
+        
+        # Count employed and unemployed workers
+        employed = 0
+        unemployed = 0
+        short_term_unemployed = 0
+        
+        for worker in self.labor_supply.get_children("Worker"):
+            if worker.V("_employed") > 0:
+                employed += 1
+            else:
+                unemployed += 1
+                # Check if short-term (unemployed < 1 period)
+                Tu = worker.V("_Tu") if hasattr(worker, '_Tu') else 0
+                if Tu < 1:
+                    short_term_unemployed += 1
+        
+        total = employed + unemployed
+        if total > 0:
+            Ue = unemployed / total  # Unemployment rate
+            Us = short_term_unemployed / total  # Short-term unemployment
+        else:
+            Ue = 0.0
+            Us = 0.0
+        
+        self.labor_supply.WRITE("Ue", Ue)
+        self.labor_supply.WRITE("Us", Us)
+        self.labor_supply.WRITE("L", employed * Lscale)
+        
+        return Ue
+    
+    def _workers_apply_for_jobs(self):
+        """Workers send job applications"""
+        omega = self.params.get('omega', 3)  # Applications per worker
+        
+        for worker in self.labor_supply.get_children("Worker"):
+            # Unemployed workers apply
+            if worker.V("_employed") == 0:
+                # Send omega applications (Poisson distributed)
+                n_appl = random_engine.poisson(omega)
+                worker.WRITE("_appl", n_appl)
+                
+                # Apply to random firms (simplified - would use proper selection)
+                # This would be implemented fully with application queues
+    
+    def _firms_post_vacancies(self):
+        """Firms post wage offers and vacancies"""
+        # Firm1 vacancies
+        for firm in self.capital_sector.get_children("Firm1"):
+            L1d = firm.V("_L1d")
+            L1 = firm.V("_L1")
+            JO1 = max(0, L1d - L1)
+            firm.WRITE("_JO1", JO1)
+        
+        # Firm2 vacancies
+        for firm in self.consumption_sector.get_children("Firm2"):
+            L2d = firm.V("_L2d")
+            L2 = firm.V("_L2")
+            JO2 = max(0, L2d - L2)
+            firm.WRITE("_JO2", JO2)
+    
+    def _match_workers_to_firms(self):
+        """Match worker applications to firm vacancies"""
+        # Simplified matching - full implementation would use
+        # the application queues and worker ranking
         pass
     
     def _production(self):
         """Production based on hired labor"""
-        pass
+        # Capital sector production
+        for firm in self.capital_sector.get_children("Firm1"):
+            # Simplified production
+            L1 = firm.V("_L1")
+            Btau = firm.V("_Btau")
+            m1 = self.params.get('m1', 1.0)
+            
+            # Production = labor * productivity * modularity
+            Q1 = L1 * Btau * m1
+            firm.WRITE("_Q1", Q1)
+            
+            # Sales equal production (no inventories in capital sector)
+            firm.WRITE("_S1", Q1)
+            
+            # Wage bill
+            w1 = firm.V("_w1")
+            W1 = L1 * w1
+            firm.WRITE("_W1", W1)
+        
+        # Consumption sector production
+        for firm in self.consumption_sector.get_children("Firm2"):
+            # Simplified production (without vintages for now)
+            L2 = firm.V("_L2")
+            K = firm.V("_K")
+            m2 = self.params.get('m2', 1.0)
+            
+            # Production constrained by capital
+            if K > 0:
+                # Effective productivity (simplified)
+                A2e = INIPROD * 0.8  # Placeholder
+                Q2e = min(L2 * A2e, K * m2)
+            else:
+                Q2e = 0.0
+            
+            firm.WRITE("_Q2e", Q2e)
+            
+            # Wage bill (simplified - constant wage)
+            L2d = firm.V("_L2d")
+            if L2d > 0:
+                w2avg = INIWAGE
+                W2 = L2 * w2avg
+            else:
+                W2 = 0.0
+            
+            firm.WRITE("_W2", W2)
+            firm.WRITE("_w2avg", INIWAGE)
     
     def _price_setting(self):
         """Firms set prices"""
@@ -603,7 +756,66 @@ class Country(BaseAgent):
     
     def _entry_exit(self):
         """Handle firm entry and exit"""
-        pass
+        # Count firms needing exit (negative net worth)
+        exit1 = sum(1 for firm in self.capital_sector.get_children("Firm1")
+                   if firm.V("_NW1") < 0)
+        exit2 = sum(1 for firm in self.consumption_sector.get_children("Firm2")
+                   if firm.V("_NW2") < 0)
+        
+        self.WRITE("cExit", exit1 + exit2)
+        
+        # Entry based on market conditions (simplified)
+        # Full implementation would use entry rules
+        self.WRITE("cEntry", 0)
+    
+    def _compute_statistics(self):
+        """Compute all statistics"""
+        # Sectoral statistics
+        sector1_stats = stats_module.compute_sectoral_statistics(
+            self.capital_sector, "Firm1")
+        sector2_stats = stats_module.compute_sectoral_statistics(
+            self.consumption_sector, "Firm2")
+        
+        # Write sectoral stats
+        for key, value in sector1_stats.items():
+            self.stats.WRITE(key, value)
+        for key, value in sector2_stats.items():
+            self.stats.WRITE(key, value)
+        
+        # Labor statistics
+        labor_stats = stats_module.compute_labor_statistics(self.labor_supply)
+        for key, value in labor_stats.items():
+            self.labor_supply.WRITE(key, value)
+        
+        # Financial statistics
+        fin_stats = stats_module.compute_financial_statistics(self.financial_sector)
+        for key, value in fin_stats.items():
+            self.financial_sector.WRITE(key, value)
+        
+        # Credit statistics
+        credit_stats = stats_module.compute_credit_statistics(
+            self.capital_sector, self.consumption_sector)
+        for key, value in credit_stats.items():
+            self.stats.WRITE(key, value)
+        
+        # Productivity statistics
+        prod_stats = stats_module.compute_productivity_statistics(self.capital_sector)
+        for key, value in prod_stats.items():
+            self.stats.WRITE(key, value)
+        
+        # Price index and inflation
+        price_index = stats_module.compute_price_index(self.consumption_sector)
+        self.WRITE("priceIndex", price_index)
+        
+        price_index_lag = self.VL("priceIndex", 1)
+        inflation = stats_module.compute_inflation(price_index, price_index_lag)
+        self.WRITE("Inflation", inflation)
+        
+        # GDP growth
+        GDP_current = self.V("GDPreal")
+        GDP_lag = self.VL("GDPreal", 1)
+        GDP_growth = stats_module.compute_growth_rate(GDP_current, GDP_lag)
+        self.WRITE("GDPgrowth", GDP_growth)
     
     def _update_lags(self):
         """Update all lagged variables"""
@@ -649,8 +861,19 @@ class KSModel:
         self.results = {
             'GDPreal': [],
             'GDPnom': [],
+            'GDPgrowth': [],
             'Unemployment': [],
             'Inflation': [],
+            'Consumption': [],
+            'Investment': [],
+            'Government': [],
+            'Wages': [],
+            'Profits': [],
+            'Debt': [],
+            'Tax': [],
+            'HH1': [],  # Capital sector concentration
+            'HH2': [],  # Consumption sector concentration
+            'AtauAvg': [],  # Average productivity
             'time': []
         }
     
@@ -673,6 +896,19 @@ class KSModel:
             self.results['time'].append(t)
             self.results['GDPreal'].append(self.country.V("GDPreal"))
             self.results['GDPnom'].append(self.country.V("GDPnom"))
+            self.results['GDPgrowth'].append(self.country.V("GDPgrowth"))
+            self.results['Unemployment'].append(self.country.labor_supply.V("Ue"))
+            self.results['Inflation'].append(self.country.V("Inflation"))
+            self.results['Consumption'].append(self.country.V("Cd"))
+            self.results['Government'].append(self.country.V("G"))
+            self.results['Debt'].append(self.country.V("Deb"))
+            self.results['Tax'].append(self.country.V("Tax"))
+            
+            # Sectoral statistics
+            if hasattr(self.country, 'stats'):
+                self.results['HH1'].append(self.country.stats.V("HH1"))
+                self.results['HH2'].append(self.country.stats.V("HH2"))
+                self.results['AtauAvg'].append(self.country.stats.V("AtauAvg"))
             
             if (t + 1) % 100 == 0:
                 print(f"  Period {t + 1}/{self.T_max} completed")
