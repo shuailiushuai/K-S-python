@@ -288,3 +288,171 @@ class Bank(BaseAgent):
         self.WRITE("_ExRes", excess)
         
         return required, excess
+    
+    def compute_pecking_order(self) -> int:
+        """
+        Compute pecking order ranking for credit allocation.
+        Based on _qc equation in fun_KS_bank.h
+        
+        Returns:
+            Number of clients ranked
+        """
+        rank1 = []
+        rank2 = []
+        
+        # Rank sector 1 clients by NW/S ratio
+        for cli in self.get_children("Cli1"):
+            firm = cli.get_hook("firm")
+            if firm:
+                NW1 = firm.VL("_NW1", 1)
+                S1 = firm.VL("_S1", 1)
+                
+                # Compute net-worth-to-sales ratio
+                if NW1 > 0 and S1 > 0:
+                    NWtoS = NW1 / S1
+                else:
+                    NWtoS = 0.0
+                
+                rank1.append(FirmRank(NWtoS=NWtoS, firm=firm))
+        
+        # Rank sector 2 clients by NW/S ratio
+        for cli in self.get_children("Cli2"):
+            firm = cli.get_hook("firm")
+            if firm:
+                NW2 = firm.VL("_NW2", 1)
+                S2 = firm.VL("_S2", 1)
+                
+                # Compute net-worth-to-sales ratio
+                if NW2 > 0 and S2 > 0:
+                    NWtoS = NW2 / S2
+                else:
+                    NWtoS = 0.0
+                
+                rank2.append(FirmRank(NWtoS=NWtoS, firm=firm))
+        
+        # Sort in descending order (higher ratios first)
+        rank1.sort(key=lambda r: r.NWtoS, reverse=True)
+        rank2.sort(key=lambda r: r.NWtoS, reverse=True)
+        
+        # Assign credit quality classes (1=best, 4=worst)
+        i = len(rank1)
+        for h, cli in enumerate(rank1):
+            if h < i * 0.25:
+                qc = 1
+            elif h < i * 0.5:
+                qc = 2
+            elif h < i * 0.75:
+                qc = 3
+            else:
+                qc = 4
+            
+            cli.firm.WRITE("_qc1", qc)
+        
+        j = len(rank2)
+        for h, cli in enumerate(rank2):
+            if h < j * 0.25:
+                qc = 1
+            elif h < j * 0.5:
+                qc = 2
+            elif h < j * 0.75:
+                qc = 3
+            else:
+                qc = 4
+            
+            cli.firm.WRITE("_qc2", qc)
+        
+        return i + j
+    
+    def compute_total_credit_supply(self, params: dict) -> float:
+        """
+        Compute total credit supply available to firms.
+        Based on _TC equation in fun_KS_bank.h
+        
+        Args:
+            params: Model parameters
+            
+        Returns:
+            Total credit available (-1 means unlimited)
+        """
+        flagCreditRule = params.get('flagCreditRule', 0)
+        
+        if flagCreditRule == 1:
+            # Deposits multiplier rule
+            tauB = params.get('tauB', 0.1)
+            Depo = self.V("_Depo")
+            TC = Depo / tauB if tauB > 0 else 0.0
+        elif flagCreditRule == 2:
+            # Basel-like credit rule with fragility
+            tauB = params.get('tauB', 0.1)
+            betaB = params.get('betaB', 1.0)
+            mPerB = params.get('mPerB', 4)
+            
+            # Moving average of fragility
+            Bda_avg = 0.0
+            count = 0
+            try:
+                for i in range(mPerB):
+                    val = self.VL("_Bda", i)
+                    Bda_avg += val
+                    count += 1
+            except:
+                # No history available
+                pass
+            
+            if count > 0:
+                Bda_avg /= count
+            else:
+                Bda_avg = self.V("_Bda") if hasattr(self, '_Bda') else 0.0
+            
+            # Capital adequacy adjusted for fragility
+            NWb = self.V("_NWb")
+            TC = NWb / (tauB * (1 + betaB * Bda_avg)) if tauB > 0 else 0.0
+        else:
+            # No credit limit
+            TC = -1.0
+        
+        self.WRITE("_TC", TC)
+        return TC
+    
+    def allocate_credit_by_sector(self, params: dict) -> tuple:
+        """
+        Allocate credit between sectors.
+        Based on _TC1free and _TC2free equations.
+        
+        Args:
+            params: Model parameters
+            
+        Returns:
+            Tuple of (TC1free, TC2free)
+        """
+        flagCreditRule = params.get('flagCreditRule', 0)
+        
+        if flagCreditRule == 0:
+            # No credit limit
+            return -1.0, -1.0
+        
+        # Get credit demand from both sectors
+        CD1b = self.VL("_CD1b", 1)
+        CD2b = self.VL("_CD2b", 1)
+        
+        # Allocate proportionally to demand
+        if CD1b + CD2b > 0:
+            share1 = CD1b / (CD1b + CD2b)
+            share2 = CD2b / (CD1b + CD2b)
+        else:
+            # No demand - split 50/50
+            share1 = 0.5
+            share2 = 0.5
+        
+        # Free credit to lend
+        TC = self.V("_TC")
+        Loans = self.VL("_Loans", 1)
+        free_credit = max(0.0, TC - Loans)
+        
+        TC1free = share1 * free_credit
+        TC2free = share2 * free_credit
+        
+        self.WRITE("_TC1free", TC1free)
+        self.WRITE("_TC2free", TC2free)
+        
+        return TC1free, TC2free

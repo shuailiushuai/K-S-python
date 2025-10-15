@@ -353,3 +353,75 @@ class Firm1(BaseAgent):
         self.WRITE("_f1", f1)
         
         return f1
+    
+    def compute_max_debt(self, params: dict) -> float:
+        """
+        Compute prudential maximum debt.
+        Based on _Deb1max equation in fun_KS_firm1.h
+        
+        Args:
+            params: Model parameters
+            
+        Returns:
+            Maximum debt allowed
+        """
+        Lambda = params.get('Lambda', 2.0)
+        Lambda0 = params.get('Lambda0', 1.0)
+        pK0 = params.get('pK0', 1.0)
+        
+        # Maximum debt from net worth and operating margin
+        NW1 = self.VL("_NW1", 1)
+        S1 = self.VL("_S1", 1)
+        W1 = self.VL("_W1", 1)
+        
+        debt_from_margin = Lambda * max(NW1, S1 - W1)
+        
+        # Get parent's PPI
+        PPI = self.parent.VL("PPI", 1) if hasattr(self.parent, 'PPI') else 1.0
+        
+        # Absolute floor
+        debt_floor = Lambda0 * PPI / pK0
+        
+        Deb1max = max(debt_from_margin, debt_floor)
+        
+        # Reset credit tracking
+        self.WRITE("_CD1", 0.0)
+        self.WRITE("_CD1c", 0.0)
+        self.WRITE("_CS1", 0.0)
+        self.WRITE("_Deb1max", Deb1max)
+        
+        return Deb1max
+    
+    def request_credit(self, amount: float) -> float:
+        """
+        Request credit from bank.
+        Updates _CD1, _CD1c, _CS1
+        
+        Args:
+            amount: Desired credit amount
+            
+        Returns:
+            Credit supplied
+        """
+        # Track credit demand
+        self.INCR("_CD1", amount)
+        
+        # Get maximum debt allowed
+        Deb1max = self.V("_Deb1max")
+        current_debt = self.V("_Deb1")
+        
+        # Can't exceed maximum
+        available_space = max(0.0, Deb1max - current_debt)
+        constrained_request = min(amount, available_space)
+        
+        # Track constraint
+        if constrained_request < amount:
+            self.INCR("_CD1c", amount - constrained_request)
+        
+        # Get bank to supply credit (simplified - actual uses bank client relationship)
+        supplied = constrained_request  # In full implementation, bank may ration further
+        
+        self.INCR("_CS1", supplied)
+        self.INCR("_Deb1", supplied)
+        
+        return supplied
