@@ -11,6 +11,8 @@ from python.config import *
 from python.worker import Worker
 from python.bank import Bank
 from python.firm1 import Firm1
+from python.firm2 import Firm2
+from python.vintage import Vint, create_vintage
 
 
 class TestRandomEngine(unittest.TestCase):
@@ -284,6 +286,91 @@ class TestDataStructures(unittest.TestCase):
         rank = FirmRank(NWtoS=0.5, firm=agent)
         self.assertEqual(rank.NWtoS, 0.5)
         self.assertEqual(rank.firm, agent)
+
+
+class TestFirm2(unittest.TestCase):
+    """Test Firm2 (consumption sector) agent"""
+    
+    def setUp(self):
+        """Set up test firm"""
+        random_engine.seed(42)
+        parent = BaseAgent(0, "Consumption", None)
+        self.firm = Firm2(1, parent)
+        self.firm.WRITE("_NW2", 100.0)
+        self.firm.WRITE("_f2", 0.01)
+        self.firm.WRITE("_mu2", 0.25)
+        self.firm.WRITE("_c2", 1.0)
+        self.firm.WRITE("_p2", 1.25)
+    
+    def test_initial_state(self):
+        """Test firm initial state"""
+        self.assertEqual(self.firm._ID2, 1)
+        self.assertEqual(self.firm.V("_NW2"), 100.0)
+        self.assertEqual(self.firm.V("_mu2"), 0.25)
+    
+    def test_expected_demand(self):
+        """Test demand expectation computation"""
+        params = {'flagExpect': 0, 'e0': 0.5}
+        self.firm._life2cycle = 5  # Not an entrant
+        
+        # Set current and lagged values properly
+        self.firm.vars["_D2"] = [100.0, 90.0]
+        self.firm.vars["_D2d"] = [120.0, 110.0]
+        
+        D2e = self.firm.compute_expected_demand(params, 10)
+        self.assertGreater(D2e, 0)
+    
+    def test_markup_computation(self):
+        """Test variable markup"""
+        params = {'f2min': 0.001, 'upsilon': 0.02}
+        self.firm.WRITE("_f2", 0.01)
+        
+        mu2 = self.firm.compute_markup(params)
+        self.assertGreater(mu2, 0)
+    
+    def test_competitiveness(self):
+        """Test competitiveness index"""
+        params = {'omega1': 1.0, 'omega2': 0.0}
+        self.firm.WRITE("_p2", 1.25)
+        
+        E = self.firm.compute_competitiveness(params)
+        self.assertGreater(E, 0)
+
+
+class TestVintage(unittest.TestCase):
+    """Test capital vintage management"""
+    
+    def setUp(self):
+        """Set up test vintage"""
+        random_engine.seed(42)
+        parent = BaseAgent(0, "Firm2", None)
+        self.vintage = Vint(1, parent)
+    
+    def test_vintage_creation(self):
+        """Test vintage creation"""
+        parent = BaseAgent(0, "Firm2", None)
+        vintage = create_vintage(parent, t=10, n_machines=5,
+                                productivity_A=1.5, productivity_B=1.4,
+                                price=100.0, vintage_id=1)
+        
+        self.assertEqual(vintage.V("__tVint"), 10)
+        self.assertEqual(vintage.V("__nVint"), 5)
+        self.assertEqual(vintage.V("__Avint"), 1.5)
+    
+    def test_scrap_demand(self):
+        """Test scrapping decision"""
+        params = {'eta': 20, 'b': 3.0, 'm2': 1.0}
+        self.vintage.WRITE("__tVint", 5)
+        self.vintage.WRITE("__nVint", 10)
+        self.vintage.WRITE("__Avint", 1.0)
+        self.vintage._Vint__Avint = 1.0  # Set private attribute
+        
+        scrap = self.vintage.compute_scrap_demand(
+            params, t=10, supplier_Atau=1.5, supplier_p1=100.0,
+            firm_w2avg=1.0, firm_postChg=False
+        )
+        
+        self.assertGreaterEqual(scrap, 0)
 
 
 if __name__ == '__main__':
